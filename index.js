@@ -1,70 +1,43 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const axios = require("axios");
-require("dotenv").config();
+const express = require('express');
+const axios = require('axios');
+const bodyParser = require('body-parser');
+require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+app.use(bodyParser.json());
 
 const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
 const ZAPI_INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
 
-console.log(`Z-API Token carregado: ${ZAPI_TOKEN}`);
+app.post('/webhook', async (req, res) => {
+  console.log('📨 Requisição recebida no /webhook:');
+  console.log(JSON.stringify(req.body, null, 2));
 
-app.use(bodyParser.json());
-
-app.post("/webhook", async (req, res) => {
   try {
-    console.log("📨 Requisição recebida no /webhook:");
-    console.log(JSON.stringify(req.body, null, 2));
+    const phone = req.body.phone || req.body.message?.from;
+    const mensagem = req.body.text?.message || req.body.message?.text?.body;
 
-    const mensagem = req.body?.text?.message;
-    const numero = req.body?.phone;
-
-    if (!mensagem || !numero) {
-      console.log("❌ Mensagem ou número ausente. Ignorando.");
+    if (!phone || !mensagem) {
+      console.log('❌ Mensagem ou número ausente. Ignorando.');
       return res.sendStatus(400);
     }
 
-    const gatilho =
-      "Gostaria de mais informações sobre a casa de Alto Padrão em Araras/SP, por favor.";
+    const resposta = `Olá! Recebemos sua mensagem: "${mensagem}". Em breve um corretor entrará em contato.`;
 
-    if (mensagem.trim() === gatilho) {
-      const resposta =
-        "Olá! Obrigado pelo seu interesse na casa de Alto Padrão em Araras/SP. Posso te fazer algumas perguntas rápidas para entender melhor seu perfil?";
-      await enviarMensagem(numero, resposta);
-    } else {
-      console.log("⚠️ Gatilho não reconhecido. Ignorando a mensagem.");
-    }
+    await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}/send-messages`, {
+      phone: phone,
+      message: resposta
+    });
 
+    console.log('✅ Mensagem enviada com sucesso.');
     res.sendStatus(200);
   } catch (error) {
-    console.error("❌ Erro ao processar mensagem:", error.message);
+    console.error('❌ Erro ao enviar mensagem:', error.message);
     res.sendStatus(500);
   }
 });
 
-async function enviarMensagem(numero, mensagem) {
-  try {
-    const numeroLimpo = String(numero).replace(/\D/g, "");
-    const url = `https://api.z-api.io/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}/send-messages`;
-
-    const payload = {
-      phone: numeroLimpo,
-      message: mensagem,
-    };
-
-    const response = await axios.post(url, payload);
-    console.log("✅ Mensagem enviada com sucesso:", response.data);
-  } catch (error) {
-    console.error("❌ Erro ao enviar mensagem:", error.response?.data || error.message);
-  }
-}
-
-app.get("/", (req, res) => {
-  res.send("Bot está rodando!");
-});
-
-app.listen(port, () => {
-  console.log(`🚀 Bot rodando na porta ${port}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Bot rodando na porta ${PORT}`);
 });
