@@ -1,49 +1,24 @@
 const express = require('express');
-const axios = require('axios');
 const bodyParser = require('body-parser');
+const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const port = process.env.PORT || 3000;
+
+// Carrega o token da Z-API do arquivo .env
+const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
+console.log(`Z-API Token carregado: ${ZAPI_TOKEN}`);
 
 app.use(bodyParser.json());
 
-// Função para enviar mensagem usando Z-API
-async function enviarMensagem(numero, mensagem) {
-  const payload = {
-    phone: numero,
-    message: mensagem
-  };
-
-  console.log('🔄 Enviando mensagem para:', numero);
-  console.log('📦 Payload:', payload);
-
-  try {
-    const response = await axios.post(
-      `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE_ID}/token/${process.env.ZAPI_TOKEN}/send-text`,
-      payload,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Client-Token': process.env.ZAPI_TOKEN // se Z-API exigir esse cabeçalho
-        }
-      }
-    );
-
-    console.log('✅ Mensagem enviada com sucesso:', response.data);
-  } catch (error) {
-    console.error('❌ Erro ao enviar mensagem:', error.response?.data || error.message);
-  }
-}
-
-// Webhook que recebe a mensagem do WhatsApp
 app.post('/webhook', async (req, res) => {
   try {
     console.log('📨 Requisição recebida no /webhook:');
     console.log(JSON.stringify(req.body, null, 2));
 
-    const mensagem = req.body?.message?.text?.body;
-    const numero = req.body?.message?.from;
+    const mensagem = req.body?.text?.message;
+    const numero = req.body?.phone;
 
     if (!mensagem || !numero) {
       console.log('❌ Mensagem ou número ausente. Ignorando.');
@@ -51,6 +26,7 @@ app.post('/webhook', async (req, res) => {
     }
 
     const gatilho = "Gostaria de mais informações sobre a casa de Alto Padrão em Araras/SP, por favor.";
+
     if (mensagem.trim() === gatilho) {
       const resposta = "Olá! Obrigado pelo seu interesse na casa de Alto Padrão em Araras/SP. Posso te fazer algumas perguntas rápidas para entender melhor seu perfil?";
       await enviarMensagem(numero, resposta);
@@ -65,10 +41,25 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+async function enviarMensagem(numero, mensagem) {
+  try {
+    const url = `https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}/send-messages`;
+    const payload = {
+      phone: numero,
+      message: mensagem,
+    };
+
+    const response = await axios.post(url, payload);
+    console.log('✅ Mensagem enviada com sucesso:', response.data);
+  } catch (error) {
+    console.error('❌ Erro ao enviar mensagem:', error.message);
+  }
+}
+
 app.get('/', (req, res) => {
-  res.send('Bot ativo.');
+  res.send('Bot está rodando!');
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Bot rodando na porta ${PORT}`);
+app.listen(port, () => {
+  console.log(`🚀 Bot rodando na porta ${port}`);
 });
