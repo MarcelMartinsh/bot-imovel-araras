@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
+const qualificarLead = require('./qualificador');
 
 const app = express();
 app.use(bodyParser.json());
@@ -10,7 +11,6 @@ app.use(bodyParser.json());
 const INSTANCE_ID = process.env.INSTANCE_ID;
 const TOKEN = process.env.CLIENT_TOKEN;
 const API_URL = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
-const GATILHO = 'interesse imovel';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PORT = process.env.PORT || 3000;
 
@@ -21,10 +21,10 @@ app.get('/', (req, res) => {
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
-  // Loga a requisição completa para debug
+  // Loga o corpo completo da requisição para análise
   console.log('🔍 Corpo recebido:', JSON.stringify(body, null, 2));
 
-  // Tentativas de extração do telefone e da mensagem
+  // Extração robusta do número e mensagem
   const phone = body.sender?.phone || body.phone || body.from || null;
   const message =
     body.message?.body?.text ||
@@ -33,7 +33,6 @@ app.post('/webhook', async (req, res) => {
     body.body ||
     null;
 
-  // Validação básica
   if (!phone || !message) {
     console.warn('📭 Requisição sem telefone ou mensagem válida.');
     return res.status(400).json({ error: 'Telefone ou mensagem ausente.' });
@@ -41,14 +40,17 @@ app.post('/webhook', async (req, res) => {
 
   console.log(`📩 Mensagem recebida de ${phone}: ${message}`);
 
-  // Verificação do gatilho
-  if (!message.toLowerCase().includes(GATILHO.toLowerCase())) {
-    console.log('⚠️ Gatilho não identificado. Ignorando.');
+  // Qualificação do lead
+  const leadQualificado = qualificarLead({ phone, message });
+
+  if (!leadQualificado) {
+    console.log('🚫 Lead não qualificado. Ignorando.');
     return res.sendStatus(204); // No Content
   }
 
   try {
-    // Requisição para o ChatGPT
+    console.log('🧠 Enviando para o ChatGPT...');
+
     const completion = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -74,9 +76,9 @@ app.post('/webhook', async (req, res) => {
     );
 
     const respostaFinal = completion.data.choices[0].message.content.trim();
-    console.log(`🤖 Resposta do ChatGPT: ${respostaFinal}`);
+    console.log('🧠 Resposta gerada pelo ChatGPT:', respostaFinal);
 
-    // Envia a resposta para o WhatsApp via Z-API
+    console.log('📤 Enviando mensagem pelo Z-API...');
     const envio = await axios.post(
       API_URL,
       {
@@ -91,7 +93,7 @@ app.post('/webhook', async (req, res) => {
       }
     );
 
-    console.log(`✅ Resposta enviada para ${phone}`);
+    console.log(`✅ Mensagem enviada com sucesso para ${phone}`);
     res.sendStatus(200);
 
   } catch (error) {
