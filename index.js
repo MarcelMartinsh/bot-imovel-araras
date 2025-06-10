@@ -24,9 +24,10 @@ app.post('/webhook', async (req, res) => {
   // Loga o corpo completo da requisição para análise
   console.log('🔍 Corpo recebido:', JSON.stringify(body, null, 2));
 
-  // Extração robusta do número e mensagem
-  const phone = body.sender?.phone || body.phone || body.from || null;
+  // ✅ Correção: extrai corretamente o número e a mensagem
+  const phone = body.phone || body.sender?.phone || body.from || null;
   const message =
+    body.text?.message ||
     body.message?.body?.text ||
     body.message?.text ||
     body.message ||
