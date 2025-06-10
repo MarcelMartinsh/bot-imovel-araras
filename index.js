@@ -21,10 +21,10 @@ app.get('/', (req, res) => {
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
-  // Loga o corpo completo da requisição para análise
+  // Loga o corpo completo da requisição
   console.log('🔍 Corpo recebido:', JSON.stringify(body, null, 2));
 
-  // ✅ Correção: extrai corretamente o número e a mensagem
+  // Extração robusta do número e da mensagem
   const phone = body.phone || body.sender?.phone || body.from || null;
   const message =
     body.text?.message ||
@@ -52,6 +52,9 @@ app.post('/webhook', async (req, res) => {
   try {
     console.log('🧠 Enviando para o ChatGPT...');
 
+    // Corrige o tipo da mensagem para string
+    const textoLimpo = typeof message === 'object' ? JSON.stringify(message) : String(message);
+
     const completion = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
@@ -63,7 +66,7 @@ app.post('/webhook', async (req, res) => {
           },
           {
             role: 'user',
-            content: message
+            content: textoLimpo
           }
         ],
         temperature: 0.7
