@@ -12,15 +12,21 @@ const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+// Define o gatilho necessário para o bot responder
+const GATILHO = "interesse imovel";
+
 app.post('/webhook', async (req, res) => {
   const { phone, text } = req.body;
 
-  if (!text?.message) {
-    console.log("❌ Mensagem vazia ou inválida recebida.");
+  const mensagem = text?.message?.toLowerCase() || '';
+
+  // Verifica se a mensagem contém o gatilho necessário
+  if (!mensagem.includes(GATILHO)) {
+    console.log("📭 Mensagem recebida sem gatilho. Ignorada.");
     return res.sendStatus(200);
   }
 
-  console.log("📨 Requisição recebida no /webhook:");
+  console.log("📨 Gatilho detectado. Requisição recebida no /webhook:");
   console.log(req.body);
 
   const prompt = `
@@ -34,7 +40,7 @@ Você é um assistente educado e profissional que responde potenciais compradore
 Mensagem recebida do cliente: "${text.message}"
 
 Resposta:
-`;
+  `;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -46,7 +52,7 @@ Resposta:
     const respostaFinal = completion.choices[0].message.content;
     console.log(`💬 Enviando resposta para ${phone}: ${respostaFinal}`);
 
-    const resposta = await axios.post(
+    await axios.post(
       `https://api.z-api.io/instances/${INSTANCE_ID}/send-messages`,
       {
         phone: phone,
