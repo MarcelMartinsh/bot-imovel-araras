@@ -1,81 +1,58 @@
-const express = require("express");
-const axios = require("axios");
-const bodyParser = require("body-parser");
-require("dotenv").config();
-
+const express = require('express');
+const axios = require('axios');
+const bodyParser = require('body-parser');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-const ZAPI_INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
-const ZAPI_TOKEN = process.env.ZAPI_TOKEN;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const INSTANCE_ID = '3E25D92604A4304948AE06E9A5181015'; // substitua se necessário
+const TOKEN = '7CCF4CA1D28B3807703B71A8'; // substitua se necessário
 
-console.log("🚀 Bot rodando na porta", PORT);
+app.get('/', (req, res) => {
+  res.send('🤖 Bot Imóvel Araras ativo!');
+});
 
-app.post("/webhook", async (req, res) => {
+app.post('/webhook', async (req, res) => {
+  const payload = req.body;
+  console.log('📨 Requisição recebida no /webhook:\n', payload);
+
+  // Ignora mensagens enviadas pelo próprio número ou vazias
+  if (payload.fromMe || !payload.text || !payload.text.message) {
+    console.log('🔕 Mensagem ignorada (do próprio número ou sem texto).');
+    return res.sendStatus(200);
+  }
+
+  const userMessage = payload.text.message;
+  const phone = payload.phone || payload.chatLid;
+
+  // Resposta fixa – pode trocar por integração com GPT se quiser
+  const respostaFinal = 
+`Claro, com prazer! 
+
+A casa de Alto Padrão localizada em Araras/SP destaca-se por sua ampla metragem e acabamentos de excelente qualidade. Possui 4 suítes arejadas e confortáveis, cuja iluminação natural é incrível, além de oferecer uma vista espetacular da cidade. A cozinha é completamente equipada, o que certamente enriquecerá suas experiências culinárias. Além disso, o imóvel oferece um espaço de lazer com piscina e churrasqueira, ideal para momentos com a família e amigos.
+
+Para mais informações como valor, condições de pagamento ou agendamento de visitas, entre em contato diretamente com o corretor Ramon Guiral via WhatsApp: (19) 99990-2492. Ele terá o prazer em te atender!`;
+
   try {
-    const data = req.body;
-    console.log("📨 Requisição recebida no /webhook:");
-    console.log(JSON.stringify(data, null, 2));
+    console.log(`💬 Enviando resposta para ${phone}: ${respostaFinal}`);
 
-    const userMessage = data.text?.message;
-    const chatLid = data.chatLid;
-
-    if (!userMessage || !chatLid) {
-      console.error("❌ Dados inválidos: mensagem ou chatLid ausente.");
-      return res.status(400).send("Dados inválidos");
-    }
-
-    // Enviar a mensagem para a OpenAI
-    const completion = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+    const resposta = await axios.post(
+      `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-messages`,
       {
-        model: "gpt-4",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Você é um assistente educado e objetivo que responde dúvidas sobre um imóvel à venda em Araras/SP. Seja cordial, breve e sempre recomende o contato com o corretor Ramon Guiral no WhatsApp (19) 99990-2492 ao final.",
-          },
-          {
-            role: "user",
-            content: userMessage,
-          },
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
+        phone: phone,
+        message: respostaFinal,
       }
     );
 
-    const respostaGpt = completion.data.choices[0].message.content;
-
-    console.log(`💬 Enviando resposta para ${chatLid}: ${respostaGpt}`);
-
-    // Enviar resposta via Z-API (usando chatLid no lugar de phone)
-    await axios.post(
-      `https://api.z-api.io/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}/send-message`,
-      {
-        chatId: chatLid, // <--- ESSA é a correção principal
-        message: respostaGpt,
-      }
-    );
-
-    console.log("✅ Mensagem enviada com sucesso.");
+    console.log('✅ Mensagem enviada com sucesso.', resposta.data);
     res.sendStatus(200);
   } catch (error) {
-    console.error("❌ Erro ao enviar mensagem:", error.response?.data || error.message);
+    console.error('❌ Erro ao enviar mensagem:', error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Bot está online!");
+app.listen(PORT, () => {
+  console.log(`🚀 Bot rodando na porta ${PORT}`);
 });
-
-app.listen(PORT);
