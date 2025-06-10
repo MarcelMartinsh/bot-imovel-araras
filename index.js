@@ -1,69 +1,98 @@
+require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
 const axios = require('axios');
-const { OpenAI } = require('openai');
+const bodyParser = require('body-parser');
 
 const app = express();
 app.use(bodyParser.json());
 
-// CONFIGURAÇÃO DO BOT
-const API_URL = 'https://api.z-api.io/instances/3E25D92604A4304948AE06E9A5181015/token/7CCF4CA1D28B3807703B71A8/send-text';
+// CONFIGURAÇÕES DO BOT
+const INSTANCE_ID = process.env.INSTANCE_ID;
+const TOKEN = process.env.CLIENT_TOKEN;
+const API_URL = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
 const GATILHO = 'interesse imovel';
 
-// CONFIGURAÇÃO DO OPENAI
+// CONFIG OPENAI
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('🤖 Bot de atendimento está online!');
+});
 
 app.post('/webhook', async (req, res) => {
-  const { phone, text } = req.body;
-  const mensagem = text?.message?.toLowerCase() || '';
+  const body = req.body;
 
-  // Ignora mensagens que não contêm o gatilho
-  if (!mensagem.includes(GATILHO)) {
-    console.log('📭 Mensagem sem gatilho. Ignorada.');
-    return res.sendStatus(200);
+  const phone = body.phone || body.sender?.phone || body.from;
+  const message = body.message?.body?.text || body.message;
+
+  if (!phone || !message) {
+    console.warn('📭 Requisição sem telefone ou mensagem válida.');
+    return res.status(400).json({ error: 'Parâmetros ausentes.' });
   }
 
-  console.log('📨 Mensagem com gatilho recebida:');
-  console.log(req.body);
+  console.log(`📩 Mensagem recebida de ${phone}: ${message}`);
 
-  const prompt = `
-Você é um assistente educado e profissional que responde potenciais compradores interessados em um imóvel de alto padrão localizado em Araras/SP. Use a seguinte estrutura na resposta:
-
-1. Agradeça o interesse.
-2. Destaque as características do imóvel: 4 suítes, cozinha moderna, área gourmet, piscina, grande terreno com jardins, fachada imponente.
-3. Encaminhe o interessado ao corretor responsável Ramon Guiral - WhatsApp (19) 99990-2492.
-4. Seja objetivo, claro e gentil.
-
-Mensagem recebida do cliente: "${text.message}"
-
-Resposta:
-`;
+  // Verifica o gatilho
+  if (!message.toLowerCase().includes(GATILHO.toLowerCase())) {
+    console.log('⚠️ Gatilho não identificado. Ignorando.');
+    return res.sendStatus(204);
+  }
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-    });
+    // Requisição para o ChatGPT
+    const completion = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: 'Você é um atendente cordial especializado em vendas de imóveis de alto padrão.'
+          },
+          {
+            role: 'user',
+            content: message
+          }
+        ],
+        temperature: 0.7
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
-    const respostaFinal = completion.choices[0].message.content;
-    console.log(`💬 Enviando resposta para ${phone}: ${respostaFinal}`);
+    const respostaFinal = completion.data.choices[0].message.content.trim();
+    console.log(`🤖 Resposta do ChatGPT: ${respostaFinal}`);
 
-    const resposta = await axios.post(API_URL, {
-      phone: phone,
-      message: respostaFinal,
-    });
+    // Envia a resposta para o WhatsApp via Z-API
+    const envio = await axios.post(
+      API_URL,
+      {
+        phone: phone,
+        message: respostaFinal
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'client-token': TOKEN
+        }
+      }
+    );
 
-    console.log('✅ Mensagem enviada com sucesso:', resposta.data);
+    console.log(`✅ Resposta enviada para ${phone}`);
     res.sendStatus(200);
+
   } catch (error) {
-    console.error('❌ Erro ao enviar mensagem:', error.response?.data || error.message);
-    res.sendStatus(500);
+    console.error('❌ Erro no processamento:', error?.response?.data || error.message);
+    res.status(500).json({ error: 'Erro ao processar a mensagem.' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Bot rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
