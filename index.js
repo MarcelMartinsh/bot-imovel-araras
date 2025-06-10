@@ -6,27 +6,26 @@ const { OpenAI } = require('openai');
 const app = express();
 app.use(bodyParser.json());
 
+// CONFIGURAÇÃO DO BOT
+const INSTANCE_ID = '3E25D92604A4304948AE06E9A5181015';
+const TOKEN = 'F8be546a575774bf7af6c68199bff0ae9S';
+const GATILHO = 'interesse imovel';
+
+// CONFIGURAÇÃO DO OPENAI
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const TOKEN = process.env.ZAPI_TOKEN;
-const INSTANCE_ID = process.env.ZAPI_INSTANCE_ID;
-
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-
-// Define o gatilho necessário para o bot responder
-const GATILHO = "interesse imovel";
 
 app.post('/webhook', async (req, res) => {
   const { phone, text } = req.body;
-
   const mensagem = text?.message?.toLowerCase() || '';
 
-  // Verifica se a mensagem contém o gatilho necessário
+  // Ignora mensagens que não contêm o gatilho
   if (!mensagem.includes(GATILHO)) {
-    console.log("📭 Mensagem recebida sem gatilho. Ignorada.");
+    console.log('📭 Mensagem sem gatilho. Ignorada.');
     return res.sendStatus(200);
   }
 
-  console.log("📨 Gatilho detectado. Requisição recebida no /webhook:");
+  console.log('📨 Mensagem com gatilho recebida:');
   console.log(req.body);
 
   const prompt = `
@@ -40,7 +39,7 @@ Você é um assistente educado e profissional que responde potenciais compradore
 Mensagem recebida do cliente: "${text.message}"
 
 Resposta:
-  `;
+`;
 
   try {
     const completion = await openai.chat.completions.create({
@@ -52,23 +51,19 @@ Resposta:
     const respostaFinal = completion.choices[0].message.content;
     console.log(`💬 Enviando resposta para ${phone}: ${respostaFinal}`);
 
-    await axios.post(
-      `https://api.z-api.io/instances/${INSTANCE_ID}/send-messages`,
+    // ENVIO COM ENDPOINT /send-text
+    const resposta = await axios.post(
+      `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`,
       {
         phone: phone,
         message: respostaFinal,
-      },
-      {
-        headers: {
-          'Client-Token': TOKEN,
-        },
       }
     );
 
-    console.log("✅ Mensagem enviada com sucesso.");
+    console.log('✅ Mensagem enviada com sucesso:', resposta.data);
     res.sendStatus(200);
   } catch (error) {
-    console.error("❌ Erro ao enviar mensagem:", error.response?.data || error.message);
+    console.error('❌ Erro ao enviar mensagem:', error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
