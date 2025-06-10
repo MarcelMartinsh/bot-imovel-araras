@@ -7,8 +7,7 @@ const app = express();
 app.use(bodyParser.json());
 
 // CONFIGURAÇÃO DO BOT
-const INSTANCE_ID = '3E25D92604A4304948AE06E9A5181015';
-const TOKEN = 'F8be546a575774bf7af6c68199bff0ae9S';
+const API_URL = 'https://api.z-api.io/instances/3E25D92604A4304948AE06E9A5181015/token/7CCF4CA1D28B3807703B71A8/send-text';
 const GATILHO = 'interesse imovel';
 
 // CONFIGURAÇÃO DO OPENAI
@@ -51,14 +50,10 @@ Resposta:
     const respostaFinal = completion.choices[0].message.content;
     console.log(`💬 Enviando resposta para ${phone}: ${respostaFinal}`);
 
-    // ENVIO COM ENDPOINT /send-text
-    const resposta = await axios.post(
-      `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`,
-      {
-        phone: phone,
-        message: respostaFinal,
-      }
-    );
+    const resposta = await axios.post(API_URL, {
+      phone: phone,
+      message: respostaFinal,
+    });
 
     console.log('✅ Mensagem enviada com sucesso:', resposta.data);
     res.sendStatus(200);
