@@ -1,111 +1,48 @@
-require('dotenv').config();
-const express = require('express');
-const axios = require('axios');
-const bodyParser = require('body-parser');
-const qualificarLead = require('./qualificador');
+import express from 'express';
+import axios from 'axios';
+import gerarResposta from './qualificador.js';
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
-// CONFIGURAÇÕES
-const INSTANCE_ID = process.env.INSTANCE_ID;
-const TOKEN = process.env.CLIENT_TOKEN;
-const API_URL = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
-  res.send('🤖 Bot de atendimento está online!');
-});
+// Configurações da instância Z-API
+const zApiUrl = 'https://api.z-api.io/instances/3E25D92604A4304948AE06E9A5181015/token/7CCF4CA1D28B3807703B71A8/send-text';
 
 app.post('/webhook', async (req, res) => {
   const body = req.body;
-
-  // Loga o corpo completo da requisição
   console.log('🔍 Corpo recebido:', JSON.stringify(body, null, 2));
 
-  // Extração robusta
-  const phone = body.phone || body.sender?.phone || body.from || null;
-  const message =
-    body.text?.message ||
-    body.message?.body?.text ||
-    body.message?.text ||
-    body.message ||
-    body.body ||
-    null;
-
-  if (!phone || !message) {
-    console.warn('📭 Requisição sem telefone ou mensagem válida.');
-    return res.status(400).json({ error: 'Telefone ou mensagem ausente.' });
-  }
-
-  console.log(`📩 Mensagem recebida de ${phone}: ${message}`);
-
-  const leadQualificado = qualificarLead({ phone, message });
-
-  if (!leadQualificado) {
-    console.log('🚫 Lead não qualificado. Ignorando.');
-    return res.sendStatus(204);
-  }
-
   try {
+    const telefone = body.phone;
+    const mensagem = body.text?.message;
+
+    if (!telefone || !mensagem) {
+      console.warn('📭 Requisição sem telefone ou mensagem válida.');
+      return res.status(400).json({ error: 'Telefone ou mensagem ausente.' });
+    }
+
+    console.log(`📩 Mensagem recebida de ${telefone}: ${mensagem}`);
     console.log('🧠 Enviando para o ChatGPT...');
 
-    // CORREÇÃO DEFINITIVA: garante string
-    const textoLimpo =
-      typeof message === 'string'
-        ? message
-        : typeof message === 'object'
-        ? JSON.stringify(message)
-        : String(message);
-
-    const completion = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: 'gpt-4',
-        messages: [
-          {
-            role: 'system',
-            content: 'Você é um assistente cordial que responde dúvidas de clientes interessados em um imóvel à venda.'
-          },
-          {
-            role: 'user',
-            content: textoLimpo // ✅ USANDO AQUI AGORA
-          }
-        ],
-        temperature: 0.7
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const respostaFinal = completion.data.choices[0].message.content.trim();
-    console.log('🧠 Resposta gerada pelo ChatGPT:', respostaFinal);
+    const resposta = await gerarResposta(mensagem);
+    console.log('🧠 Resposta gerada pelo ChatGPT:', resposta);
 
     console.log('📤 Enviando mensagem pelo Z-API...');
-    const envio = await axios.post(
-      API_URL,
-      {
-        phone: phone,
-        message: respostaFinal
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'client-token': TOKEN
-        }
-      }
-    );
 
-    console.log(`✅ Mensagem enviada com sucesso para ${phone}`);
-    res.sendStatus(200);
+    const payload = {
+      phone: telefone,
+      message: resposta
+    };
+
+    const zapiResponse = await axios.post(zApiUrl, payload);
+    console.log('✅ Mensagem enviada com sucesso:', zapiResponse.data);
+
+    res.status(200).json({ status: 'OK', resposta });
   } catch (error) {
-    console.error('❌ Erro no processamento:', error?.response?.data || error.message);
-    res.status(500).json({ error: 'Erro ao processar a mensagem.' });
+    console.error('❌ Erro no processamento:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Erro interno', detalhes: error.response?.data || error.message });
   }
 });
 
