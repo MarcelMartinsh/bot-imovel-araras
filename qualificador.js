@@ -1,36 +1,49 @@
-const OpenAI = require("openai");
+const axios = require('axios');
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+async function gerarResposta(texto) {
+  const mensagemString = typeof texto === 'string' ? texto : JSON.stringify(texto);
 
-async function gerarResposta(mensagemDoUsuario, historico = []) {
-  const completion = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
-    messages: [
-      {
-        role: "system",
-        content: `Você é um assistente inteligente de um imóvel único à venda em Araras, SP. 
-O imóvel possui 5 suítes, área construída de 368 m², terreno de 690 m², varanda gourmet integrada, churrasqueira, escritório externo e fachada imponente.
-
-Seu objetivo é qualificar o interessado com perguntas como:
-- Você está buscando um imóvel para moradia ou investimento?
-- Você está pronto para visitar o imóvel presencialmente?
-- Você possui financiamento aprovado ou pretende fazer?
-- Está em busca de algo com esse padrão (suítes, gourmet, terreno amplo etc)?
-
-Ao final da qualificação, peça autorização para encaminhar o contato ao corretor responsável, Ramon Guiral.`  
-      },
-      ...historico,
-      {
-        role: "user",
-        content: mensagemDoUsuario
+  const response = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content: 'Você é um assistente cordial que responde dúvidas sobre um imóvel à venda.'
+        },
+        {
+          role: 'user',
+          content: mensagemString // 🔧 AQUI está corrigido!
+        }
+      ],
+      temperature: 0.7
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
       }
-    ],
-    temperature: 0.7
-  });
+    }
+  );
 
-  return completion.choices[0].message.content;
+  return response.data.choices[0].message.content.trim();
 }
 
-module.exports = gerarResposta;
+function qualificarLead({ phone, message }) {
+  // Aqui você pode colocar validações mais específicas se quiser
+  if (!message || typeof message !== 'string') return false;
+
+  return {
+    phone,
+    message
+  };
+}
+
+module.exports = async function ({ phone, message }) {
+  const lead = qualificarLead({ phone, message });
+  if (!lead) return null;
+
+  const resposta = await gerarResposta(lead.message);
+  return resposta;
+};
