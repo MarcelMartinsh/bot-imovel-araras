@@ -48,17 +48,33 @@ app.post('/webhook', async (req, res) => {
     historicos[numero].push({ role: "assistant", content: resposta });
 
     // Envia resposta ao cliente
-    await axios.post(`https://api.z-api.io/instances/${ID_INSTANCIA}/token/${TOKEN_ZAPI}/send-text`, {
-      phone: numero,
-      message: resposta
-    });
+    await axios.post(
+      `https://api.z-api.io/instances/${ID_INSTANCIA}/token/${TOKEN_ZAPI}/send-text`,
+      {
+        phone: numero,
+        message: resposta
+      },
+      {
+        headers: {
+          'Client-Token': TOKEN_ZAPI
+        }
+      }
+    );
 
     // Encaminha ao corretor se lead parecer qualificado
     if (resposta.toLowerCase().includes("encaminhar") || resposta.toLowerCase().includes("ramon")) {
-      await axios.post(`https://api.z-api.io/instances/${ID_INSTANCIA}/token/${TOKEN_ZAPI}/send-text`, {
-        phone: CORRETOR,
-        message: `📥 Novo lead qualificado:\n\nWhatsApp: ${numero}\n\nÚltima mensagem: "${mensagem}"`
-      });
+      await axios.post(
+        `https://api.z-api.io/instances/${ID_INSTANCIA}/token/${TOKEN_ZAPI}/send-text`,
+        {
+          phone: CORRETOR,
+          message: `📥 Novo lead qualificado:\n\nWhatsApp: ${numero}\n\nÚltima mensagem: "${mensagem}"`
+        },
+        {
+          headers: {
+            'Client-Token': TOKEN_ZAPI
+          }
+        }
+      );
     }
 
     return res.sendStatus(200);
