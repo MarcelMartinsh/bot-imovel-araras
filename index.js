@@ -1,4 +1,3 @@
-
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -10,6 +9,21 @@ app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
 const corretorWhatsApp = process.env.CORRETOR_WHATSAPP;
+
+// Envia vídeo automaticamente se detectar interesse
+async function enviarVideoZapi(telefone) {
+    await axios.post(`https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE_ID}/token/${process.env.ZAPI_TOKEN}/send-file`, {
+        phone: telefone,
+        url: "https://drive.google.com/uc?export=download&id=1HXZIFgMYvZ4w6e3BodWcW9z39bexyN1f",
+        fileName: "video-imovel-araras.mp4",
+        caption: "🎥 Segue o vídeo do imóvel no Jardim Universitário, conforme solicitado."
+    }, {
+        headers: {
+            'Content-Type': 'application/json',
+            'Client-Token': process.env.ZAPI_TOKEN
+        }
+    });
+}
 
 app.post('/webhook', async (req, res) => {
     const mensagem = req.body.message?.text?.body || '';
@@ -28,6 +42,11 @@ app.post('/webhook', async (req, res) => {
             'Client-Token': process.env.ZAPI_TOKEN
         }
     });
+
+    const lower = resposta.toLowerCase();
+    if (lower.includes("vídeo") || lower.includes("video") || lower.includes("posso ver o vídeo") || lower.includes("tem vídeo")) {
+        await enviarVideoZapi(telefone);
+    }
 
     if (leadEstaQualificado(telefone)) {
         const dados = extrairDadosLead(telefone);
