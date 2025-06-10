@@ -10,7 +10,7 @@ app.use(bodyParser.json());
 const PORT = process.env.PORT || 3000;
 const corretorWhatsApp = process.env.CORRETOR_WHATSAPP;
 
-// Envia vídeo automaticamente se detectar interesse
+// Função para envio automático de vídeo
 async function enviarVideoZapi(telefone) {
     await axios.post(`https://api.z-api.io/instances/${process.env.ZAPI_INSTANCE_ID}/token/${process.env.ZAPI_TOKEN}/send-file`, {
         phone: telefone,
@@ -30,6 +30,13 @@ app.post('/webhook', async (req, res) => {
     const telefone = req.body.message?.from || '';
 
     if (!mensagem || !telefone) return res.sendStatus(400);
+
+    const mensagemEsperada = "gostaria de mais informações sobre a casa de alto padrão em araras/sp, por favor.";
+    const mensagemRecebida = mensagem.trim().toLowerCase();
+
+    if (mensagemRecebida !== mensagemEsperada) {
+        return res.sendStatus(200); // ignora completamente a mensagem
+    }
 
     const resposta = await gerarRespostaQualificacao(mensagem, telefone);
 
