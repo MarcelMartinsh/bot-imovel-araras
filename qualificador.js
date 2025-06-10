@@ -1,51 +1,36 @@
-const { Configuration, OpenAIApi } = require("openai");
-const leads = {};
+const OpenAI = require("openai");
 
-const config = new Configuration({ apiKey: process.env.OPENAI_API_KEY });
-const openai = new OpenAIApi(config);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
-async function gerarRespostaQualificacao(mensagem, telefone) {
-    if (!leads[telefone]) leads[telefone] = [];
-
-    leads[telefone].push({ role: "user", content: mensagem });
-
-    const promptBase = {
+async function gerarResposta(mensagemDoUsuario, historico = []) {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-3.5-turbo",
+    messages: [
+      {
         role: "system",
-        content:
-            "Você é um assistente inteligente de um imóvel único à venda em Araras, SP. " +
-            "O imóvel possui 5 suítes, área construída de 368 m², terreno de 690 m², varanda gourmet integrada, " +
-            "churrasqueira, escritório externo e fachada imponente. Seu objetivo é qualificar o interessado com perguntas como:\\n" +
-            "1. Compra financiada ou à vista?\\n" +
-            "2. Já conhece a região?\\n" +
-            "3. Perfil da família?\\n" +
-            "4. Faixa de valor disponível?\\n" +
-            "5. Interesse em receber vídeo e agendar visita?\\n" +
-            "Se o cliente demonstrar interesse, peça o nome e melhor horário para contato. Use linguagem natural e objetiva."
-    };
+        content: `Você é um assistente inteligente de um imóvel único à venda em Araras, SP. 
+O imóvel possui 5 suítes, área construída de 368 m², terreno de 690 m², varanda gourmet integrada, churrasqueira, escritório externo e fachada imponente.
 
-    const response = await openai.createChatCompletion({
-        model: "gpt-4",
-        messages: [promptBase, ...leads[telefone]],
-        temperature: 0.7
-    });
+Seu objetivo é qualificar o interessado com perguntas como:
+- Você está buscando um imóvel para moradia ou investimento?
+- Você está pronto para visitar o imóvel presencialmente?
+- Você possui financiamento aprovado ou pretende fazer?
+- Está em busca de algo com esse padrão (suítes, gourmet, terreno amplo etc)?
 
-    const resposta = response.data.choices[0].message.content;
-    leads[telefone].push({ role: "assistant", content: resposta });
-    return resposta;
+Ao final da qualificação, peça autorização para encaminhar o contato ao corretor responsável, Ramon Guiral.`  
+      },
+      ...historico,
+      {
+        role: "user",
+        content: mensagemDoUsuario
+      }
+    ],
+    temperature: 0.7
+  });
+
+  return completion.choices[0].message.content;
 }
 
-function leadEstaQualificado(telefone) {
-    const historico = leads[telefone]?.map(m => m.content.toLowerCase()).join(' ') || '';
-    return historico.includes("meu nome é") ||
-           historico.includes("me chama") ||
-           historico.includes("me ligar") ||
-           historico.includes("quero visitar") ||
-           historico.includes("sim, pode me chamar") ||
-           historico.includes("pode entrar em contato");
-}
-
-function extrairDadosLead(telefone) {
-    return leads[telefone]?.map(m => m.content).join('\\n') || 'sem dados';
-}
-
-module.exports = { gerarRespostaQualificacao, leadEstaQualificado, extrairDadosLead };
+module.exports = gerarResposta;
