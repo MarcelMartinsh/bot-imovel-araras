@@ -8,15 +8,11 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Variáveis de ambiente
 const TOKEN_ZAPI = process.env.ZAPI_TOKEN;
 const ID_INSTANCIA = process.env.ZAPI_INSTANCE_ID;
 const CORRETOR = process.env.CORRETOR_WHATSAPP;
 
-// Mensagem-gatilho para iniciar o atendimento
 const gatilho = "gostaria de mais informações sobre a casa de alto padrão em araras/sp, por favor.";
-
-// Histórico de conversas por número
 const historicos = {};
 
 app.post('/webhook', async (req, res) => {
@@ -31,16 +27,13 @@ app.post('/webhook', async (req, res) => {
 
   const mensagemFormatada = mensagem.trim().toLowerCase();
 
-  // Aceita somente se for a mensagem exata, ou se já existe histórico
   if (mensagemFormatada !== gatilho && !historicos[numero]) {
     console.log("Mensagem fora do padrão ignorada");
     return res.sendStatus(200);
   }
 
-  // Inicia histórico se for a primeira mensagem
   if (!historicos[numero]) historicos[numero] = [];
 
-  // Adiciona mensagem do usuário
   historicos[numero].push({ role: "user", content: mensagem });
 
   try {
@@ -49,7 +42,7 @@ app.post('/webhook', async (req, res) => {
 
     // Envia resposta ao cliente
     await axios.post(
-      `https://api.z-api.io/instances/${ID_INSTANCIA}/token/${TOKEN_ZAPI}/send-text`,
+      `https://api.z-api.io/instances/${ID_INSTANCIA}/send-text`,
       {
         phone: numero,
         message: resposta
@@ -61,10 +54,15 @@ app.post('/webhook', async (req, res) => {
       }
     );
 
-    // Encaminha ao corretor se lead parecer qualificado
-    if (resposta.toLowerCase().includes("encaminhar") || resposta.toLowerCase().includes("ramon")) {
+    // Encaminha lead ao corretor se parecer qualificado
+    if (
+      resposta.toLowerCase().includes("encaminhar") ||
+      resposta.toLowerCase().includes("ramon") ||
+      resposta.toLowerCase().includes("telefone") ||
+      resposta.toLowerCase().includes("visita")
+    ) {
       await axios.post(
-        `https://api.z-api.io/instances/${ID_INSTANCIA}/token/${TOKEN_ZAPI}/send-text`,
+        `https://api.z-api.io/instances/${ID_INSTANCIA}/send-text`,
         {
           phone: CORRETOR,
           message: `📥 Novo lead qualificado:\n\nWhatsApp: ${numero}\n\nÚltima mensagem: "${mensagem}"`
@@ -84,7 +82,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Rota de teste
 app.get('/', (req, res) => {
   res.send('Bot rodando na porta ' + PORT);
 });
