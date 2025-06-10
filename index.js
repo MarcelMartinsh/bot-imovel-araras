@@ -6,15 +6,12 @@ const bodyParser = require('body-parser');
 const app = express();
 app.use(bodyParser.json());
 
-// CONFIGURAÇÕES DO BOT
+// CONFIGURAÇÕES
 const INSTANCE_ID = process.env.INSTANCE_ID;
 const TOKEN = process.env.CLIENT_TOKEN;
 const API_URL = `https://api.z-api.io/instances/${INSTANCE_ID}/token/${TOKEN}/send-text`;
 const GATILHO = 'interesse imovel';
-
-// CONFIG OPENAI
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
@@ -24,20 +21,30 @@ app.get('/', (req, res) => {
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
-  const phone = body.phone || body.sender?.phone || body.from;
-  const message = body.message?.body?.text || body.message;
+  // Loga a requisição completa para debug
+  console.log('🔍 Corpo recebido:', JSON.stringify(body, null, 2));
 
+  // Tentativas de extração do telefone e da mensagem
+  const phone = body.sender?.phone || body.phone || body.from || null;
+  const message =
+    body.message?.body?.text ||
+    body.message?.text ||
+    body.message ||
+    body.body ||
+    null;
+
+  // Validação básica
   if (!phone || !message) {
     console.warn('📭 Requisição sem telefone ou mensagem válida.');
-    return res.status(400).json({ error: 'Parâmetros ausentes.' });
+    return res.status(400).json({ error: 'Telefone ou mensagem ausente.' });
   }
 
   console.log(`📩 Mensagem recebida de ${phone}: ${message}`);
 
-  // Verifica o gatilho
+  // Verificação do gatilho
   if (!message.toLowerCase().includes(GATILHO.toLowerCase())) {
     console.log('⚠️ Gatilho não identificado. Ignorando.');
-    return res.sendStatus(204);
+    return res.sendStatus(204); // No Content
   }
 
   try {
@@ -49,7 +56,7 @@ app.post('/webhook', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: 'Você é um atendente cordial especializado em vendas de imóveis de alto padrão.'
+            content: 'Você é um assistente cordial que responde dúvidas de clientes interessados em um imóvel à venda.'
           },
           {
             role: 'user',
