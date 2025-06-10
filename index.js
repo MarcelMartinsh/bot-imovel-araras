@@ -24,15 +24,23 @@ app.post('/webhook', async (req, res) => {
 
     const resposta = `Olá! Recebemos sua mensagem: "${mensagem}". Em breve um corretor entrará em contato.`;
 
-    await axios.post(`https://api.z-api.io/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}/send-messages`, {
-      phone: phone,
-      message: resposta
-    });
+    await axios.post(
+      `https://api.z-api.io/instances/${ZAPI_INSTANCE_ID}/token/${ZAPI_TOKEN}/send-messages`,
+      {
+        phone: phone,
+        message: resposta
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
     console.log('✅ Mensagem enviada com sucesso.');
     res.sendStatus(200);
   } catch (error) {
-    console.error('❌ Erro ao enviar mensagem:', error.message);
+    console.error('❌ Erro ao enviar mensagem:', error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
