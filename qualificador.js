@@ -1,49 +1,23 @@
-const axios = require('axios');
+import OpenAI from 'openai';
 
-async function gerarResposta(texto) {
-  const mensagemString = typeof texto === 'string' ? texto : JSON.stringify(texto);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || 'SUA_CHAVE_AQUI'
+});
 
-  const response = await axios.post(
-    'https://api.openai.com/v1/chat/completions',
-    {
-      model: 'gpt-4',
-      messages: [
-        {
-          role: 'system',
-          content: 'Você é um assistente cordial que responde dúvidas sobre um imóvel à venda.'
-        },
-        {
-          role: 'user',
-          content: mensagemString // 🔧 AQUI está corrigido!
-        }
-      ],
-      temperature: 0.7
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
+export default async function gerarResposta(mensagem) {
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-3.5-turbo',
+    messages: [
+      {
+        role: 'system',
+        content: 'Você é um assistente formal de atendimento para venda de imóvel localizado no Jardim Universitário, em Araras/SP. Sempre responda pedindo mais detalhes do interesse.'
+      },
+      {
+        role: 'user',
+        content: mensagem
       }
-    }
-  );
+    ]
+  });
 
-  return response.data.choices[0].message.content.trim();
+  return completion.choices[0].message.content.trim();
 }
-
-function qualificarLead({ phone, message }) {
-  // Aqui você pode colocar validações mais específicas se quiser
-  if (!message || typeof message !== 'string') return false;
-
-  return {
-    phone,
-    message
-  };
-}
-
-module.exports = async function ({ phone, message }) {
-  const lead = qualificarLead({ phone, message });
-  if (!lead) return null;
-
-  const resposta = await gerarResposta(lead.message);
-  return resposta;
-};
