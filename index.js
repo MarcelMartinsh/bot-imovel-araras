@@ -15,6 +15,18 @@ const CORRETOR = process.env.CORRETOR_WHATSAPP;
 const gatilho = "gostaria de mais informações sobre a casa de alto padrão em araras/sp, por favor.";
 const historicos = {};
 
+// DEBUG opcional — pode remover após testes
+console.log("Z-API Token carregado:", TOKEN_ZAPI);
+
+// Criação de cliente axios com cabeçalho fixo
+const zapi = axios.create({
+  baseURL: `https://api.z-api.io/instances/${ID_INSTANCIA}`,
+  headers: {
+    'Client-Token': TOKEN_ZAPI,
+    'Content-Type': 'application/json'
+  }
+});
+
 app.post('/webhook', async (req, res) => {
   const body = req.body;
   const mensagem = body.message?.text?.body || '';
@@ -41,38 +53,22 @@ app.post('/webhook', async (req, res) => {
     historicos[numero].push({ role: "assistant", content: resposta });
 
     // Envia resposta ao cliente
-    await axios.post(
-      `https://api.z-api.io/instances/${ID_INSTANCIA}/send-text`,
-      {
-        phone: numero,
-        message: resposta
-      },
-      {
-        headers: {
-          'Client-Token': TOKEN_ZAPI
-        }
-      }
-    );
+    await zapi.post('/send-text', {
+      phone: numero,
+      message: resposta
+    });
 
-    // Encaminha lead ao corretor se parecer qualificado
+    // Encaminha ao corretor se parecer qualificado
     if (
       resposta.toLowerCase().includes("encaminhar") ||
       resposta.toLowerCase().includes("ramon") ||
       resposta.toLowerCase().includes("telefone") ||
       resposta.toLowerCase().includes("visita")
     ) {
-      await axios.post(
-        `https://api.z-api.io/instances/${ID_INSTANCIA}/send-text`,
-        {
-          phone: CORRETOR,
-          message: `📥 Novo lead qualificado:\n\nWhatsApp: ${numero}\n\nÚltima mensagem: "${mensagem}"`
-        },
-        {
-          headers: {
-            'Client-Token': TOKEN_ZAPI
-          }
-        }
-      );
+      await zapi.post('/send-text', {
+        phone: CORRETOR,
+        message: `📥 Novo lead qualificado:\n\nWhatsApp: ${numero}\n\nÚltima mensagem: "${mensagem}"`
+      });
     }
 
     return res.sendStatus(200);
