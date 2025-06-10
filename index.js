@@ -24,7 +24,7 @@ app.post('/webhook', async (req, res) => {
   // Loga o corpo completo da requisição
   console.log('🔍 Corpo recebido:', JSON.stringify(body, null, 2));
 
-  // Extração robusta do número e da mensagem
+  // Extração robusta
   const phone = body.phone || body.sender?.phone || body.from || null;
   const message =
     body.text?.message ||
@@ -41,19 +41,23 @@ app.post('/webhook', async (req, res) => {
 
   console.log(`📩 Mensagem recebida de ${phone}: ${message}`);
 
-  // Qualificação do lead
   const leadQualificado = qualificarLead({ phone, message });
 
   if (!leadQualificado) {
     console.log('🚫 Lead não qualificado. Ignorando.');
-    return res.sendStatus(204); // No Content
+    return res.sendStatus(204);
   }
 
   try {
     console.log('🧠 Enviando para o ChatGPT...');
 
-    // Corrige o tipo da mensagem para string
-    const textoLimpo = typeof message === 'object' ? JSON.stringify(message) : String(message);
+    // CORREÇÃO DEFINITIVA: garante string
+    const textoLimpo =
+      typeof message === 'string'
+        ? message
+        : typeof message === 'object'
+        ? JSON.stringify(message)
+        : String(message);
 
     const completion = await axios.post(
       'https://api.openai.com/v1/chat/completions',
@@ -66,7 +70,7 @@ app.post('/webhook', async (req, res) => {
           },
           {
             role: 'user',
-            content: textoLimpo
+            content: textoLimpo // ✅ USANDO AQUI AGORA
           }
         ],
         temperature: 0.7
@@ -99,7 +103,6 @@ app.post('/webhook', async (req, res) => {
 
     console.log(`✅ Mensagem enviada com sucesso para ${phone}`);
     res.sendStatus(200);
-
   } catch (error) {
     console.error('❌ Erro no processamento:', error?.response?.data || error.message);
     res.status(500).json({ error: 'Erro ao processar a mensagem.' });
