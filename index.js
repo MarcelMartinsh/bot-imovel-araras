@@ -18,11 +18,14 @@ app.get('/', (req, res) => {
   res.sendStatus(200);
 });
 
-// 🔁 Webhook Z-API
+// 🔁 Webhook Z-API com log detalhado
 app.post('/webhook', async (req, res) => {
+  console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
+
   const { phone, message } = req.body;
 
   if (!message || !phone) {
+    console.warn('⚠️ Requisição malformada:', req.body);
     return res.status(400).send('Faltando dados.');
   }
 
@@ -35,6 +38,7 @@ app.post('/webhook', async (req, res) => {
 
     // Inicia a conversa com o prompt de sistema
     sessions[phone] = [{ role: 'system', content: process.env.GPT_PROMPT }];
+    console.log(`🤖 Nova sessão iniciada para ${phone}`);
   }
 
   // Continua o histórico da sessão
@@ -43,8 +47,6 @@ app.post('/webhook', async (req, res) => {
   try {
     // Chama o ChatGPT
     const resposta = await gerarResposta(sessions[phone]);
-
-    // Adiciona resposta no histórico
     sessions[phone].push({ role: 'assistant', content: resposta });
 
     // Envia resposta ao lead
@@ -52,24 +54,34 @@ app.post('/webhook', async (req, res) => {
 
     // Se estiver qualificado, envia aviso ao corretor
     if (isQualificado(resposta)) {
-      await sendMessage(process.env.CORRETOR_PHONE, `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`);
+      console.log(`✅ Lead qualificado detectado: ${phone}`);
+      await sendMessage(
+        process.env.CORRETOR_PHONE,
+        `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`
+      );
     }
 
     res.sendStatus(200);
   } catch (err) {
-    console.error('Erro ao gerar resposta:', err.response?.data || err.message);
+    console.error('❌ Erro ao gerar resposta:', err.response?.data || err.message);
     res.sendStatus(500);
   }
 });
 
-// 🔁 Função de envio de mensagens via Z-API
+// 🔁 Envio via Z-API com log
 async function sendMessage(phone, message) {
-  return axios.post(`${process.env.ZAPI_BASE_URL}/send-text`, {
-    phone,
-    message
-  }, {
-    headers: { 'Content-Type': 'application/json' }
-  });
+  try {
+    const response = await axios.post(`${process.env.ZAPI_BASE_URL}/send-text`, {
+      phone,
+      message
+    }, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    console.log(`📤 Mensagem enviada para ${phone}: ${message}`);
+    return response.data;
+  } catch (error) {
+    console.error(`❌ Erro ao enviar mensagem para ${phone}:`, error.response?.data || error.message);
+  }
 }
 
 app.listen(port, () => {
