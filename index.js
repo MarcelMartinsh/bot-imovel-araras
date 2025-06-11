@@ -10,27 +10,23 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Armazena sessões por telefone
 const sessions = {};
 
-// Rota raiz (health check do Render)
 app.get('/', (req, res) => {
   res.sendStatus(200);
 });
 
-// Webhook da Z-API
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
   const phone = req.body.phone;
-  const message = req.body.text?.message;
+  const message = req.body.text?.message?.trim();
 
   if (!message || !phone) {
-    console.warn('⚠️ Requisição malformada:', req.body);
     return res.status(400).send('Faltando dados.');
   }
 
-  // Inicia sessão se for a primeira mensagem com "interesse"
+  // Início da conversa
   if (!sessions[phone]) {
     if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
@@ -38,65 +34,75 @@ app.post('/webhook', async (req, res) => {
     }
 
     sessions[phone] = {
-      historico: [{ role: 'system', content: process.env.GPT_PROMPT }],
-      etapaAtual: 1
+      etapa: 1,
+      nome: '',
+      visita: '',
+      pagamento: '',
+      historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
     };
 
-    console.log(`🤖 Nova sessão iniciada para ${phone}`);
-    await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome para que eu possa anotar seu interesse?');
+    await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
     return res.sendStatus(200);
   }
 
   const sessao = sessions[phone];
-  sessao.historico.push({ role: 'user', content: message });
 
   try {
-    const resposta = await gerarResposta(sessao.historico);
-    sessao.historico.push({ role: 'assistant', content: resposta });
+    if (sessao.etapa === 1) {
+      sessao.nome = message;
+      sessao.etapa = 2;
+      await sendMessage(phone, 'Obrigado! Você gostaria de fazer uma visita ao imóvel?');
+    } else if (sessao.etapa === 2) {
+      sessao.visita = message;
+      sessao.etapa = 3;
+      await sendMessage(phone, 'Como pretende realizar o pagamento? Financiado ou à vista?');
+    } else if (sessao.etapa === 3) {
+      sessao.pagamento = message;
+      sessao.etapa = 4;
 
-    // Controle de etapas
-    if (sessao.etapaAtual === 1) {
-      await sendMessage(phone, 'Obrigado! Agora, você gostaria de fazer uma visita ao imóvel?');
-      sessao.etapaAtual = 2;
-    } else if (sessao.etapaAtual === 2) {
-      await sendMessage(phone, 'E sobre o pagamento, você pretende financiar ou pagar à vista?');
-      sessao.etapaAtual = 3;
-    } else if (sessao.etapaAtual === 3) {
-      await sendMessage(phone, resposta); // Resposta final
+      const historicoUsuario = `
+Nome: ${sessao.nome}
+Deseja visita: ${sessao.visita}
+Forma de pagamento: ${sessao.pagamento}
+      `.trim();
+
+      sessao.historico.push({ role: 'user', content: historicoUsuario });
+      const resposta = await gerarResposta(sessao.historico);
+
+      sessao.historico.push({ role: 'assistant', content: resposta });
+      await sendMessage(phone, resposta);
+
       if (isQualificado(resposta)) {
-        console.log(`✅ Lead qualificado detectado: ${phone}`);
         await sendMessage(
           process.env.CORRETOR_PHONE,
           `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`
         );
       }
-      sessao.etapaAtual = 4; // Etapa finalizada
     } else {
-      await sendMessage(phone, 'Agradecemos seu interesse. Caso tenha mais dúvidas, estou por aqui!');
+      await sendMessage(phone, 'Agradecemos seu interesse. Caso tenha mais dúvidas, estou à disposição.');
     }
 
     res.sendStatus(200);
   } catch (err) {
-    console.error('❌ Erro ao gerar resposta:', err.message);
-    await sendMessage(phone, '⚠️ Ocorreu um erro ao processar sua mensagem. Tente novamente em instantes.');
+    console.error('❌ Erro ao processar:', err.message);
+    await sendMessage(phone, '⚠️ Ocorreu um erro. Tente novamente mais tarde.');
     res.sendStatus(500);
   }
 });
 
-// Função de envio para Z-API
 async function sendMessage(phone, message) {
   try {
     const url = `${process.env.ZAPI_BASE_URL}/send-text`;
-    const response = await axios.post(url, {
-      phone,
-      message
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'client-token': process.env.ZAPI_CLIENT_TOKEN // Obrigatório
+    const response = await axios.post(
+      url,
+      { phone, message },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'client-token': process.env.ZAPI_CLIENT_TOKEN
+        }
       }
-    });
-
+    );
     console.log(`📤 Mensagem enviada para ${phone}: ${message}`);
     return response.data;
   } catch (error) {
