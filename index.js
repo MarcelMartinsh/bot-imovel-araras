@@ -1,51 +1,60 @@
-import express from 'express';
-import axios from 'axios';
-import gerarResposta from './qualificador.js';
+
+const express = require('express');
+const axios = require('axios');
+const bodyParser = require('body-parser');
+require('dotenv').config();
+
+const { gerarResposta, isQualificado } = require('./qualificador');
 
 const app = express();
-app.use(express.json());
+const port = process.env.PORT || 3000;
 
-const PORT = process.env.PORT || 3000;
+app.use(bodyParser.json());
 
-// Configurações da instância Z-API
-const zApiUrl = 'https://api.z-api.io/instances/3E25D92604A4304948AE06E9A5181015/token/7CCF4CA1D28B3807703B71A8/send-text';
+const sessions = {};
 
 app.post('/webhook', async (req, res) => {
-  const body = req.body;
-  console.log('🔍 Corpo recebido:', JSON.stringify(body, null, 2));
+  const { phone, message } = req.body;
+
+  if (!message || !phone) {
+    return res.status(400).send('Faltando dados.');
+  }
+
+  if (!sessions[phone]) {
+    if (!message.toLowerCase().includes('interesse')) {
+      await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
+      return res.sendStatus(200);
+    }
+    sessions[phone] = [{ role: 'system', content: process.env.GPT_PROMPT }];
+  }
+
+  sessions[phone].push({ role: 'user', content: message });
 
   try {
-    const telefone = body.phone;
-    const mensagem = body.text?.message;
+    const resposta = await gerarResposta(sessions[phone]);
+    sessions[phone].push({ role: 'assistant', content: resposta });
+    await sendMessage(phone, resposta);
 
-    if (!telefone || !mensagem) {
-      console.warn('📭 Requisição sem telefone ou mensagem válida.');
-      return res.status(400).json({ error: 'Telefone ou mensagem ausente.' });
+    if (isQualificado(resposta)) {
+      await sendMessage(process.env.CORRETOR_PHONE, `Novo lead qualificado!\nWhatsApp: ${phone}\nResumo:\n${resposta}`);
     }
 
-    console.log(`📩 Mensagem recebida de ${telefone}: ${mensagem}`);
-    console.log('🧠 Enviando para o ChatGPT...');
-
-    const resposta = await gerarResposta(mensagem);
-    console.log('🧠 Resposta gerada pelo ChatGPT:', resposta);
-
-    console.log('📤 Enviando mensagem pelo Z-API...');
-
-    const payload = {
-      phone: telefone,
-      message: resposta
-    };
-
-    const zapiResponse = await axios.post(zApiUrl, payload);
-    console.log('✅ Mensagem enviada com sucesso:', zapiResponse.data);
-
-    res.status(200).json({ status: 'OK', resposta });
-  } catch (error) {
-    console.error('❌ Erro no processamento:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Erro interno', detalhes: error.response?.data || error.message });
+    res.sendStatus(200);
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.sendStatus(500);
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+async function sendMessage(phone, message) {
+  return axios.post(`${process.env.ZAPI_BASE_URL}/send-text`, {
+    phone,
+    message
+  }, {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+app.listen(port, () => {
+  console.log(`🚀 Bot rodando na porta ${port}`);
 });

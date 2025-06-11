@@ -1,23 +1,30 @@
-import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'SUA_CHAVE_AQUI'
-});
+const axios = require('axios');
 
-export default async function gerarResposta(mensagem) {
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
-    messages: [
-      {
-        role: 'system',
-        content: 'Você é um assistente formal de atendimento para venda de imóvel localizado no Jardim Universitário, em Araras/SP. Sempre responda pedindo mais detalhes do interesse.'
+async function gerarResposta(history) {
+  const resposta = await axios.post(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      model: 'gpt-4o',
+      messages: history,
+      temperature: 0.7,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
-      {
-        role: 'user',
-        content: mensagem
-      }
-    ]
-  });
+    }
+  );
 
-  return completion.choices[0].message.content.trim();
+  return resposta.data.choices[0].message.content;
 }
+
+function isQualificado(resposta) {
+  const palavrasChave = ['visita', 'interessado', 'encaminharemos', 'corretor ramon', 'financiamento', 'qualificado'];
+  return palavrasChave.some(p => resposta.toLowerCase().includes(p));
+}
+
+module.exports = {
+  gerarResposta,
+  isQualificado,
+};
