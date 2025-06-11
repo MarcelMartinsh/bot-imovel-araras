@@ -1,4 +1,3 @@
-
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -11,12 +10,15 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
+// Sessões por telefone
 const sessions = {};
 
+// 🔁 Rota raiz para health check do Render
 app.get('/', (req, res) => {
   res.sendStatus(200);
 });
 
+// 🔁 Webhook Z-API
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
@@ -28,6 +30,7 @@ app.post('/webhook', async (req, res) => {
     return res.status(400).send('Faltando dados.');
   }
 
+  // Gatilho de início: "interesse"
   if (!sessions[phone]) {
     if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
@@ -50,10 +53,7 @@ app.post('/webhook', async (req, res) => {
       console.log(`✅ Lead qualificado detectado: ${phone}`);
       await sendMessage(
         process.env.CORRETOR_PHONE,
-        `📥 *Novo lead qualificado!*
-WhatsApp: ${phone}
-Resumo:
-${resposta}`
+        `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`
       );
     }
 
@@ -65,15 +65,17 @@ ${resposta}`
   }
 });
 
+// 🔁 Envio via Z-API com URL completa e Client-Token
 async function sendMessage(phone, message) {
   try {
-    const url = process.env.ZAPI_BASE_URL;
+    const url = `${process.env.ZAPI_BASE_URL}/send-text`;
     const response = await axios.post(url, {
       phone,
       message
     }, {
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Client-Token': process.env.ZAPI_CLIENT_TOKEN
       }
     });
 
