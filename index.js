@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
   res.sendStatus(200);
 });
 
-// 🔁 Webhook Z-API com logs e validações
+// 🔁 Webhook Z-API
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
@@ -30,7 +30,7 @@ app.post('/webhook', async (req, res) => {
     return res.status(400).send('Faltando dados.');
   }
 
-  // Gatilho de início
+  // Gatilho de início: "interesse"
   if (!sessions[phone]) {
     if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
@@ -65,15 +65,19 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// 🔁 Envio via Z-API com log
+// 🔁 Envio via Z-API com URL completa
 async function sendMessage(phone, message) {
   try {
-    const response = await axios.post(`${process.env.ZAPI_BASE_URL}/send-text`, {
+    const url = `${process.env.ZAPI_BASE_URL}/send-text`;
+    const response = await axios.post(url, {
       phone,
       message
     }, {
-      headers: { 'Content-Type': 'application/json' }
+      headers: {
+        'Content-Type': 'application/json'
+      }
     });
+
     console.log(`📤 Mensagem enviada para ${phone}: ${message}`);
     return response.data;
   } catch (error) {
