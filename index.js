@@ -20,14 +20,15 @@ app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
   const phone = req.body.phone;
-  const message = req.body.text?.message?.trim().toLowerCase();
+  const message = req.body.text?.message?.trim();
 
-  if (!message || !phone) {
+  if (!phone || !message) {
     return res.status(400).send('Faltando dados.');
   }
 
+  // Inicializa sessão se não existir
   if (!sessions[phone]) {
-    if (!message.includes('interesse')) {
+    if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
       return res.sendStatus(200);
     }
@@ -37,9 +38,9 @@ app.post('/webhook', async (req, res) => {
       nome: '',
       visita: '',
       pagamento: '',
-      historico: [{ role: 'system', content: process.env.GPT_PROMPT }],
-      resumo: '',
-      aguardandoConfirmacao: false
+      encaminhar: false,
+      bloqueado: false,
+      historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
     };
 
     await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
@@ -48,52 +49,66 @@ app.post('/webhook', async (req, res) => {
 
   const sessao = sessions[phone];
 
+  // Anti-spam: ignora se já estiver processando
+  if (sessao.bloqueado) {
+    console.log(`⏳ Ignorado: sessão de ${phone} está em andamento.`);
+    return res.sendStatus(200);
+  }
+
+  sessao.bloqueado = true;
+
   try {
-    if (sessao.aguardandoConfirmacao) {
-      if (message === 'sim') {
-        await sendMessage(
-          process.env.CORRETOR_PHONE,
-          `📥 *Novo lead qualificado!*
-WhatsApp: ${phone}
-Resumo:
-${sessao.resumo}`
-        );
-        await sendMessage(phone, '✅ Suas informações foram enviadas ao corretor. Ele entrará em contato em breve!');
-      } else {
-        await sendMessage(phone, '👍 Tudo bem! Se precisar de mais informações, é só me chamar.');
-      }
-      sessao.aguardandoConfirmacao = false;
-      return res.sendStatus(200);
-    }
+    switch (sessao.etapa) {
+      case 1:
+        sessao.nome = message;
+        sessao.etapa = 2;
+        await sendMessage(phone, 'Obrigado! Você gostaria de fazer uma visita ao imóvel?');
+        break;
 
-    if (sessao.etapa === 1) {
-      sessao.nome = message;
-      sessao.etapa = 2;
-      await sendMessage(phone, 'Obrigado! Você gostaria de fazer uma visita ao imóvel?');
-    } else if (sessao.etapa === 2) {
-      sessao.visita = message;
-      sessao.etapa = 3;
-      await sendMessage(phone, 'Como pretende realizar o pagamento? Financiado ou à vista?');
-    } else if (sessao.etapa === 3) {
-      sessao.pagamento = message;
-      sessao.etapa = 4;
+      case 2:
+        sessao.visita = message;
+        sessao.etapa = 3;
+        await sendMessage(phone, 'Como pretende realizar o pagamento? Financiado ou à vista?');
+        break;
 
-      const historicoUsuario = `
+      case 3:
+        sessao.pagamento = message;
+        sessao.etapa = 4;
+
+        const resumo = `
 Nome: ${sessao.nome}
 Deseja visita: ${sessao.visita}
-Forma de pagamento: ${sessao.pagamento}`.trim();
+Forma de pagamento: ${sessao.pagamento}
+        `.trim();
 
-      sessao.historico.push({ role: 'user', content: historicoUsuario });
-      const resposta = await gerarResposta(sessao.historico);
-      sessao.historico.push({ role: 'assistant', content: resposta });
+        sessao.historico.push({ role: 'user', content: resumo });
+        const resposta = await gerarResposta(sessao.historico);
+        sessao.historico.push({ role: 'assistant', content: resposta });
 
-      sessao.resumo = resposta;
+        await sendMessage(phone, resposta);
 
-      await sendMessage(phone, resposta);
-      await sendMessage(phone, 'Deseja que eu envie essas informações ao corretor responsável para que ele entre em contato com você? (Digite "sim" ou "não")');
-      sessao.aguardandoConfirmacao = true;
-    } else {
-      await sendMessage(phone, 'Agradecemos seu interesse. Caso tenha mais dúvidas, estou à disposição.');
+        // Etapa para confirmar envio ao corretor
+        await sendMessage(phone, 'Deseja que eu encaminhe essas informações ao corretor? Responda com *sim* ou *não*.');
+        sessao.etapa = 5;
+        break;
+
+      case 5:
+        if (message.toLowerCase().includes('sim')) {
+          await sendMessage(
+            process.env.CORRETOR_PHONE,
+            `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\nNome: ${sessao.nome}\nVisita: ${sessao.visita}\nPagamento: ${sessao.pagamento}`
+          );
+          await sendMessage(phone, '✅ Lead encaminhado com sucesso ao corretor.');
+          sessao.etapa = 6;
+        } else {
+          await sendMessage(phone, 'Ok! Não enviarei ao corretor. Se precisar, estou à disposição.');
+          sessao.etapa = 6;
+        }
+        break;
+
+      default:
+        await sendMessage(phone, 'Se desejar reiniciar, envie a palavra *interesse* novamente.');
+        break;
     }
 
     res.sendStatus(200);
@@ -101,6 +116,8 @@ Forma de pagamento: ${sessao.pagamento}`.trim();
     console.error('❌ Erro ao processar:', err.message);
     await sendMessage(phone, '⚠️ Ocorreu um erro. Tente novamente mais tarde.');
     res.sendStatus(500);
+  } finally {
+    sessao.bloqueado = false;
   }
 });
 
