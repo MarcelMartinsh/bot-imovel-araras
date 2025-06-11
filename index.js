@@ -22,11 +22,16 @@ app.post('/webhook', async (req, res) => {
   const phone = req.body.phone;
   const message = req.body.text?.message?.trim();
 
-  if (!message || !phone) {
-    return res.status(400).send('Faltando dados.');
+  if (!message || !phone) return res.status(400).send('Faltando dados.');
+
+  // 🔚 Cancelar conversa
+  if (['cancelar', 'encerrar'].includes(message.toLowerCase())) {
+    delete sessions[phone];
+    await sendMessage(phone, '✅ Conversa encerrada com sucesso. Para reiniciar, envie "interesse".');
+    return res.sendStatus(200);
   }
 
-  // Início da conversa
+  // 🔁 Iniciar nova sessão
   if (!sessions[phone]) {
     if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
@@ -38,14 +43,23 @@ app.post('/webhook', async (req, res) => {
       nome: '',
       visita: '',
       pagamento: '',
+      aguardandoResposta: false,
       historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
     };
 
     await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
+    sessions[phone].aguardandoResposta = true;
     return res.sendStatus(200);
   }
 
   const sessao = sessions[phone];
+
+  // ⛔ Evita processamento múltiplo enquanto aguarda resposta
+  if (!sessao.aguardandoResposta) {
+    return res.sendStatus(200); // Ignora mensagens fora de ordem
+  }
+
+  sessao.aguardandoResposta = false; // libera a próxima pergunta após receber resposta
 
   try {
     if (sessao.etapa === 1) {
@@ -82,6 +96,7 @@ Forma de pagamento: ${sessao.pagamento}
       await sendMessage(phone, 'Agradecemos seu interesse. Caso tenha mais dúvidas, estou à disposição.');
     }
 
+    sessao.aguardandoResposta = true; // marca que o bot espera nova entrada do usuário
     res.sendStatus(200);
   } catch (err) {
     console.error('❌ Erro ao processar:', err.message);
