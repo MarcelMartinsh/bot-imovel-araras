@@ -10,15 +10,15 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Sessões por telefone
+// Armazena sessões por telefone
 const sessions = {};
 
-// 🔁 Rota raiz para health check do Render
+// Rota raiz (health check do Render)
 app.get('/', (req, res) => {
   res.sendStatus(200);
 });
 
-// 🔁 Webhook Z-API
+// Webhook da Z-API
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
@@ -30,31 +30,49 @@ app.post('/webhook', async (req, res) => {
     return res.status(400).send('Faltando dados.');
   }
 
-  // Gatilho de início: "interesse"
+  // Inicia sessão se for a primeira mensagem com "interesse"
   if (!sessions[phone]) {
     if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
       return res.sendStatus(200);
     }
 
-    sessions[phone] = [{ role: 'system', content: process.env.GPT_PROMPT }];
+    sessions[phone] = {
+      historico: [{ role: 'system', content: process.env.GPT_PROMPT }],
+      etapaAtual: 1
+    };
+
     console.log(`🤖 Nova sessão iniciada para ${phone}`);
+    await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome para que eu possa anotar seu interesse?');
+    return res.sendStatus(200);
   }
 
-  sessions[phone].push({ role: 'user', content: message });
+  const sessao = sessions[phone];
+  sessao.historico.push({ role: 'user', content: message });
 
   try {
-    const resposta = await gerarResposta(sessions[phone]);
-    sessions[phone].push({ role: 'assistant', content: resposta });
+    const resposta = await gerarResposta(sessao.historico);
+    sessao.historico.push({ role: 'assistant', content: resposta });
 
-    await sendMessage(phone, resposta);
-
-    if (isQualificado(resposta)) {
-      console.log(`✅ Lead qualificado detectado: ${phone}`);
-      await sendMessage(
-        process.env.CORRETOR_PHONE,
-        `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`
-      );
+    // Controle de etapas
+    if (sessao.etapaAtual === 1) {
+      await sendMessage(phone, 'Obrigado! Agora, você gostaria de fazer uma visita ao imóvel?');
+      sessao.etapaAtual = 2;
+    } else if (sessao.etapaAtual === 2) {
+      await sendMessage(phone, 'E sobre o pagamento, você pretende financiar ou pagar à vista?');
+      sessao.etapaAtual = 3;
+    } else if (sessao.etapaAtual === 3) {
+      await sendMessage(phone, resposta); // Resposta final
+      if (isQualificado(resposta)) {
+        console.log(`✅ Lead qualificado detectado: ${phone}`);
+        await sendMessage(
+          process.env.CORRETOR_PHONE,
+          `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`
+        );
+      }
+      sessao.etapaAtual = 4; // Etapa finalizada
+    } else {
+      await sendMessage(phone, 'Agradecemos seu interesse. Caso tenha mais dúvidas, estou por aqui!');
     }
 
     res.sendStatus(200);
@@ -65,7 +83,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// 🔁 Envio via Z-API com URL completa e Client-Token
+// Função de envio para Z-API
 async function sendMessage(phone, message) {
   try {
     const url = `${process.env.ZAPI_BASE_URL}/send-text`;
@@ -75,7 +93,7 @@ async function sendMessage(phone, message) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        'Client-Token': process.env.ZAPI_CLIENT_TOKEN
+        'client-token': process.env.ZAPI_CLIENT_TOKEN // Obrigatório
       }
     });
 
