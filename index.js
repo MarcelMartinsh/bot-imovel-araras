@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
   res.sendStatus(200);
 });
 
-// 🔁 Webhook Z-API com extração correta da mensagem
+// 🔁 Webhook Z-API com logs e validações
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
@@ -30,30 +30,25 @@ app.post('/webhook', async (req, res) => {
     return res.status(400).send('Faltando dados.');
   }
 
-  // Gatilho de início: só ativa se a palavra "interesse" estiver na primeira mensagem
+  // Gatilho de início
   if (!sessions[phone]) {
     if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
       return res.sendStatus(200);
     }
 
-    // Inicia a conversa com o prompt de sistema
     sessions[phone] = [{ role: 'system', content: process.env.GPT_PROMPT }];
     console.log(`🤖 Nova sessão iniciada para ${phone}`);
   }
 
-  // Continua o histórico da sessão
   sessions[phone].push({ role: 'user', content: message });
 
   try {
-    // Chama o ChatGPT
     const resposta = await gerarResposta(sessions[phone]);
     sessions[phone].push({ role: 'assistant', content: resposta });
 
-    // Envia resposta ao lead
     await sendMessage(phone, resposta);
 
-    // Se estiver qualificado, envia aviso ao corretor
     if (isQualificado(resposta)) {
       console.log(`✅ Lead qualificado detectado: ${phone}`);
       await sendMessage(
@@ -64,7 +59,8 @@ app.post('/webhook', async (req, res) => {
 
     res.sendStatus(200);
   } catch (err) {
-    console.error('❌ Erro ao gerar resposta:', err.response?.data || err.message);
+    console.error('❌ Erro ao gerar resposta:', err.message);
+    await sendMessage(phone, '⚠️ Ocorreu um erro ao processar sua mensagem. Tente novamente em instantes.');
     res.sendStatus(500);
   }
 });
