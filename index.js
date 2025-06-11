@@ -1,17 +1,15 @@
-// index.js revisado e corrigido contra SPAM e reentradas múltiplas
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
 require('dotenv').config();
 
-const { gerarResposta, isQualificado } = require('./qualificador');
+const { gerarResposta } = require('./qualificador');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Sessões por telefone com controle de estado
 const sessions = {};
 
 app.get('/', (req, res) => {
@@ -21,35 +19,27 @@ app.get('/', (req, res) => {
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
-  const { phone, fromMe, text } = req.body;
-  const message = text?.message?.trim();
+  const phone = req.body.phone;
+  const message = req.body.text?.message?.trim().toLowerCase();
 
-  // Ignora mensagens enviadas pelo próprio bot
-  if (fromMe || !message || !phone) {
-    return res.sendStatus(200);
+  if (!message || !phone) {
+    return res.status(400).send('Faltando dados.');
   }
 
-  // Botão de encerramento
-  if (message.toLowerCase().includes('cancelar') || message.toLowerCase().includes('encerrar')) {
-    delete sessions[phone];
-    await sendMessage(phone, '✅ Conversa encerrada. Caso precise de algo, envie *interesse* para começar novamente.');
-    return res.sendStatus(200);
-  }
-
-  // Início da conversa
   if (!sessions[phone]) {
-    if (!message.toLowerCase().includes('interesse')) {
+    if (!message.includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
       return res.sendStatus(200);
     }
 
     sessions[phone] = {
       etapa: 1,
-      aguardando: true,
       nome: '',
       visita: '',
       pagamento: '',
-      historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
+      historico: [{ role: 'system', content: process.env.GPT_PROMPT }],
+      resumo: '',
+      aguardandoConfirmacao: false
     };
 
     await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
@@ -58,43 +48,50 @@ app.post('/webhook', async (req, res) => {
 
   const sessao = sessions[phone];
 
-  // Evita reentrada simultânea
-  if (sessao.aguardando === false) return res.sendStatus(200);
-
   try {
-    sessao.aguardando = false;
+    if (sessao.aguardandoConfirmacao) {
+      if (message === 'sim') {
+        await sendMessage(
+          process.env.CORRETOR_PHONE,
+          `📥 *Novo lead qualificado!*
+WhatsApp: ${phone}
+Resumo:
+${sessao.resumo}`
+        );
+        await sendMessage(phone, '✅ Suas informações foram enviadas ao corretor. Ele entrará em contato em breve!');
+      } else {
+        await sendMessage(phone, '👍 Tudo bem! Se precisar de mais informações, é só me chamar.');
+      }
+      sessao.aguardandoConfirmacao = false;
+      return res.sendStatus(200);
+    }
 
     if (sessao.etapa === 1) {
       sessao.nome = message;
       sessao.etapa = 2;
-      sessao.aguardando = true;
       await sendMessage(phone, 'Obrigado! Você gostaria de fazer uma visita ao imóvel?');
-
     } else if (sessao.etapa === 2) {
       sessao.visita = message;
       sessao.etapa = 3;
-      sessao.aguardando = true;
       await sendMessage(phone, 'Como pretende realizar o pagamento? Financiado ou à vista?');
-
     } else if (sessao.etapa === 3) {
       sessao.pagamento = message;
       sessao.etapa = 4;
 
-      const historicoUsuario = `Nome: ${sessao.nome}\nDeseja visita: ${sessao.visita}\nForma de pagamento: ${sessao.pagamento}`;
-      sessao.historico.push({ role: 'user', content: historicoUsuario });
+      const historicoUsuario = `
+Nome: ${sessao.nome}
+Deseja visita: ${sessao.visita}
+Forma de pagamento: ${sessao.pagamento}`.trim();
 
+      sessao.historico.push({ role: 'user', content: historicoUsuario });
       const resposta = await gerarResposta(sessao.historico);
       sessao.historico.push({ role: 'assistant', content: resposta });
+
+      sessao.resumo = resposta;
+
       await sendMessage(phone, resposta);
-
-      if (isQualificado(resposta)) {
-        await sendMessage(
-          process.env.CORRETOR_PHONE,
-          `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`
-        );
-      }
-
-      sessao.aguardando = true;
+      await sendMessage(phone, 'Deseja que eu envie essas informações ao corretor responsável para que ele entre em contato com você? (Digite "sim" ou "não")');
+      sessao.aguardandoConfirmacao = true;
     } else {
       await sendMessage(phone, 'Agradecemos seu interesse. Caso tenha mais dúvidas, estou à disposição.');
     }
@@ -103,7 +100,6 @@ app.post('/webhook', async (req, res) => {
   } catch (err) {
     console.error('❌ Erro ao processar:', err.message);
     await sendMessage(phone, '⚠️ Ocorreu um erro. Tente novamente mais tarde.');
-    sessao.aguardando = true;
     res.sendStatus(500);
   }
 });
