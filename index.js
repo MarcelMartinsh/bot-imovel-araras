@@ -1,4 +1,3 @@
-
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -13,6 +12,12 @@ app.use(bodyParser.json());
 
 const sessions = {};
 
+// Rota raiz para o Render validar a aplicação
+app.get('/', (req, res) => {
+  res.sendStatus(200);
+});
+
+// Rota webhook para receber mensagens da Z-API
 app.post('/webhook', async (req, res) => {
   const { phone, message } = req.body;
 
@@ -33,6 +38,7 @@ app.post('/webhook', async (req, res) => {
   try {
     const resposta = await gerarResposta(sessions[phone]);
     sessions[phone].push({ role: 'assistant', content: resposta });
+
     await sendMessage(phone, resposta);
 
     if (isQualificado(resposta)) {
@@ -41,11 +47,12 @@ app.post('/webhook', async (req, res) => {
 
     res.sendStatus(200);
   } catch (err) {
-    console.error(err.response?.data || err.message);
+    console.error('Erro ao gerar resposta:', err.response?.data || err.message);
     res.sendStatus(500);
   }
 });
 
+// Função de envio via Z-API
 async function sendMessage(phone, message) {
   return axios.post(`${process.env.ZAPI_BASE_URL}/send-text`, {
     phone,
