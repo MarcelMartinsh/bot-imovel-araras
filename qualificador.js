@@ -1,28 +1,26 @@
+const OpenAI = require("openai");
 
-const { Configuration, OpenAIApi } = require("openai");
-
-const configuration = new Configuration({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-const openai = new OpenAIApi(configuration);
 
-async function gerarResposta(historico) {
+async function gerarResposta(messages) {
   try {
-    const completion = await openai.createChatCompletion({
-      model: "gpt-4",
-      messages: historico,
+    const response = await openai.chat.completions.create({
+      model: "gpt-4", // ou "gpt-3.5-turbo"
+      messages,
     });
 
-    return completion.data.choices[0].message.content;
-  } catch (err) {
-    console.error("❌ Erro ao chamar OpenAI:", err.response?.data || err.message);
+    return response.choices[0].message.content.trim();
+  } catch (error) {
+    console.error("❌ Erro ao chamar OpenAI:", error.response?.data || error.message);
     throw new Error("Falha ao gerar resposta do ChatGPT.");
   }
 }
 
-function isQualificado(texto) {
-  const palavrasChave = ['compra', 'visita', 'financiamento', 'interesse', 'valor'];
-  return palavrasChave.some(p => texto.toLowerCase().includes(p));
+function isQualificado(resposta) {
+  const texto = resposta.toLowerCase();
+  return texto.includes("visita") || texto.includes("agendar") || texto.includes("interessado");
 }
 
 module.exports = { gerarResposta, isQualificado };
