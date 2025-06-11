@@ -1,3 +1,4 @@
+// index.js revisado e corrigido contra SPAM e reentradas múltiplas
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -10,6 +11,7 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
+// Sessões por telefone com controle de estado
 const sessions = {};
 
 app.get('/', (req, res) => {
@@ -19,19 +21,22 @@ app.get('/', (req, res) => {
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
-  const phone = req.body.phone;
-  const message = req.body.text?.message?.trim();
+  const { phone, fromMe, text } = req.body;
+  const message = text?.message?.trim();
 
-  if (!message || !phone) return res.status(400).send('Faltando dados.');
-
-  // 🔚 Cancelar conversa
-  if (['cancelar', 'encerrar'].includes(message.toLowerCase())) {
-    delete sessions[phone];
-    await sendMessage(phone, '✅ Conversa encerrada com sucesso. Para reiniciar, envie "interesse".');
+  // Ignora mensagens enviadas pelo próprio bot
+  if (fromMe || !message || !phone) {
     return res.sendStatus(200);
   }
 
-  // 🔁 Iniciar nova sessão
+  // Botão de encerramento
+  if (message.toLowerCase().includes('cancelar') || message.toLowerCase().includes('encerrar')) {
+    delete sessions[phone];
+    await sendMessage(phone, '✅ Conversa encerrada. Caso precise de algo, envie *interesse* para começar novamente.');
+    return res.sendStatus(200);
+  }
+
+  // Início da conversa
   if (!sessions[phone]) {
     if (!message.toLowerCase().includes('interesse')) {
       await sendMessage(phone, 'Olá! Para começarmos, envie a palavra *interesse*.');
@@ -40,49 +45,45 @@ app.post('/webhook', async (req, res) => {
 
     sessions[phone] = {
       etapa: 1,
+      aguardando: true,
       nome: '',
       visita: '',
       pagamento: '',
-      aguardandoResposta: false,
       historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
     };
 
     await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
-    sessions[phone].aguardandoResposta = true;
     return res.sendStatus(200);
   }
 
   const sessao = sessions[phone];
 
-  // ⛔ Evita processamento múltiplo enquanto aguarda resposta
-  if (!sessao.aguardandoResposta) {
-    return res.sendStatus(200); // Ignora mensagens fora de ordem
-  }
-
-  sessao.aguardandoResposta = false; // libera a próxima pergunta após receber resposta
+  // Evita reentrada simultânea
+  if (sessao.aguardando === false) return res.sendStatus(200);
 
   try {
+    sessao.aguardando = false;
+
     if (sessao.etapa === 1) {
       sessao.nome = message;
       sessao.etapa = 2;
+      sessao.aguardando = true;
       await sendMessage(phone, 'Obrigado! Você gostaria de fazer uma visita ao imóvel?');
+
     } else if (sessao.etapa === 2) {
       sessao.visita = message;
       sessao.etapa = 3;
+      sessao.aguardando = true;
       await sendMessage(phone, 'Como pretende realizar o pagamento? Financiado ou à vista?');
+
     } else if (sessao.etapa === 3) {
       sessao.pagamento = message;
       sessao.etapa = 4;
 
-      const historicoUsuario = `
-Nome: ${sessao.nome}
-Deseja visita: ${sessao.visita}
-Forma de pagamento: ${sessao.pagamento}
-      `.trim();
-
+      const historicoUsuario = `Nome: ${sessao.nome}\nDeseja visita: ${sessao.visita}\nForma de pagamento: ${sessao.pagamento}`;
       sessao.historico.push({ role: 'user', content: historicoUsuario });
-      const resposta = await gerarResposta(sessao.historico);
 
+      const resposta = await gerarResposta(sessao.historico);
       sessao.historico.push({ role: 'assistant', content: resposta });
       await sendMessage(phone, resposta);
 
@@ -92,15 +93,17 @@ Forma de pagamento: ${sessao.pagamento}
           `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resposta}`
         );
       }
+
+      sessao.aguardando = true;
     } else {
       await sendMessage(phone, 'Agradecemos seu interesse. Caso tenha mais dúvidas, estou à disposição.');
     }
 
-    sessao.aguardandoResposta = true; // marca que o bot espera nova entrada do usuário
     res.sendStatus(200);
   } catch (err) {
     console.error('❌ Erro ao processar:', err.message);
     await sendMessage(phone, '⚠️ Ocorreu um erro. Tente novamente mais tarde.');
+    sessao.aguardando = true;
     res.sendStatus(500);
   }
 });
