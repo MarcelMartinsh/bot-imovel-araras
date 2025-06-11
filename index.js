@@ -18,11 +18,12 @@ app.get('/', (req, res) => {
   res.sendStatus(200);
 });
 
-// 🔁 Webhook Z-API com log detalhado
+// 🔁 Webhook Z-API com extração correta da mensagem
 app.post('/webhook', async (req, res) => {
   console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
 
-  const { phone, message } = req.body;
+  const phone = req.body.phone;
+  const message = req.body.text?.message;
 
   if (!message || !phone) {
     console.warn('⚠️ Requisição malformada:', req.body);
