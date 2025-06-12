@@ -1,69 +1,44 @@
-const OpenAI = require("openai");
+// qualificador.js
+const OpenAI = require('openai');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Gera uma resposta (usado caso queira responder perguntas extras no futuro)
+// Gera a resposta final do ChatGPT com base no histórico de conversa
 async function gerarResposta(messages) {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4", // pode trocar por "gpt-3.5-turbo" se quiser economizar
+      model: 'gpt-4',
       messages,
+      temperature: 0.7,
     });
 
     return response.choices[0].message.content.trim();
   } catch (error) {
     console.error("❌ Erro ao chamar OpenAI:", error.response?.data || error.message);
-    throw new Error("Falha ao gerar resposta do ChatGPT.");
+    throw new Error("Erro ao gerar resposta com IA.");
   }
 }
 
-// Avalia se a resposta é coerente com a etapa atual
-async function isRespostaValida(etapa, resposta) {
-  const prompt = `
-Você é um assistente que avalia respostas de clientes em um atendimento via WhatsApp sobre um imóvel à venda.
+// Valida a resposta de cada etapa para evitar avanço indevido
+async function isRespostaValida(etapa, mensagem) {
+  const texto = mensagem.trim().toLowerCase();
 
-Etapa atual: ${etapa}
-Mensagem do cliente: "${resposta}"
+  if (!mensagem) return false;
 
-Diga apenas SIM ou NAO. A resposta é coerente com a etapa?
-- Etapa "nome": resposta deve parecer um nome ou algo como "meu nome é João"
-- Etapa "visita": resposta deve indicar se quer ou não visitar o imóvel
-- Etapa "pagamento": resposta deve mencionar "à vista", "financiamento", "financiado" ou similar
-`;
-
-  try {
-    const resultado = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        { role: "system", content: "Responda apenas com 'SIM' ou 'NAO'." },
-        { role: "user", content: prompt },
-      ],
-    });
-
-    const conteudo = resultado.choices[0].message.content.trim().toLowerCase();
-    return conteudo.includes('sim');
-  } catch (err) {
-    console.error("❌ Erro ao avaliar resposta:", err.message);
-    return false; // por segurança, assume que não é válida
+  switch (etapa) {
+    case 'nome':
+      return texto.length > 1; // Aceita qualquer nome não vazio
+    case 'visita':
+      return ['sim', 'não', 'nao', 'talvez'].some(p => texto.includes(p));
+    case 'pagamento':
+      return ['vista', 'financiado', 'financiamento'].some(p => texto.includes(p));
+    case 'aguardando_autorizacao':
+      return ['sim', 'não', 'nao'].some(p => texto.includes(p));
+    default:
+      return false;
   }
 }
 
-// Não é mais usado nesse fluxo, mas mantido para compatibilidade futura
-function isQualificado(resposta) {
-  const texto = resposta.toLowerCase();
-  return (
-    texto.includes("visita") ||
-    texto.includes("interesse") ||
-    texto.includes("agendar") ||
-    texto.includes("financiado") ||
-    texto.includes("à vista")
-  );
-}
-
-module.exports = {
-  gerarResposta,
-  isRespostaValida,
-  isQualificado
-};
+module.exports = { gerarResposta, isRespostaValida };
