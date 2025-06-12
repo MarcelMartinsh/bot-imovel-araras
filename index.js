@@ -1,4 +1,3 @@
-// index.js (com fluxo conversacional por etapas)
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -11,11 +10,12 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-const sessions = {}; // Memória de sessão por número
+const sessions = {};
 
 app.post('/webhook', async (req, res) => {
   const phone = req.body.phone;
   const message = req.body.text?.message?.trim();
+
   if (!message || !phone) return res.sendStatus(400);
 
   const gatilho = 'olá, gostaria de falar sobre o imóvel do jardim universitário, de araras/sp.';
@@ -24,7 +24,12 @@ app.post('/webhook', async (req, res) => {
   if (!sessions[phone]) {
     if (texto === gatilho.toLowerCase()) {
       sessions[phone] = {
-        etapa: 'nome', nome: '', visita: '', pagamento: '', historico: []
+        etapa: 'nome',
+        nome: '',
+        visita: '',
+        pagamento: '',
+        historico: [],
+        aguardandoResposta: true
       };
       await sendMessage(phone, 'Ótimo! Para começar, por favor me informe seu nome.');
     }
@@ -32,60 +37,65 @@ app.post('/webhook', async (req, res) => {
   }
 
   const sessao = sessions[phone];
-  const etapaAtual = sessao.etapa;
+  if (sessao.etapa === 'concluido') return res.sendStatus(200);
 
-  if (etapaAtual === 'concluido') return res.sendStatus(200);
+  // Se estiver aguardando resposta e ela for válida
+  if (sessao.aguardandoResposta) {
+    const respostaOk = await isRespostaValida(sessao.etapa, message);
 
-  const respostaOk = await isRespostaValida(etapaAtual, message);
+    if (!respostaOk) {
+      await sendMessage(phone, 'Desculpe, não entendi sua resposta. Pode reformular?');
+      return res.sendStatus(200);
+    }
 
-  if (!respostaOk) {
-    await sendMessage(phone, 'Desculpe, não entendi sua resposta. Pode reformular?');
-    return res.sendStatus(200);
-  }
+    sessao.aguardandoResposta = false;
 
-  if (etapaAtual === 'nome') {
-    sessao.nome = message;
-    sessao.etapa = 'visita';
-    await sendMessage(phone, 'Obrigado! Você gostaria de agendar uma visita ao imóvel?');
+    if (sessao.etapa === 'nome') {
+      sessao.nome = message;
+      sessao.etapa = 'visita';
+      sessao.aguardandoResposta = true;
+      await sendMessage(phone, 'Obrigado! Você gostaria de agendar uma visita ao imóvel?');
 
-  } else if (etapaAtual === 'visita') {
-    sessao.visita = message;
-    sessao.etapa = 'pagamento';
-    await sendMessage(phone, 'E como pretende realizar o pagamento? Financiado ou à vista?');
+    } else if (sessao.etapa === 'visita') {
+      sessao.visita = message;
+      sessao.etapa = 'pagamento';
+      sessao.aguardandoResposta = true;
+      await sendMessage(phone, 'E como pretende realizar o pagamento? Financiado ou à vista?');
 
-  } else if (etapaAtual === 'pagamento') {
-    sessao.pagamento = message;
-    sessao.etapa = 'aguardando_autorizacao';
+    } else if (sessao.etapa === 'pagamento') {
+      sessao.pagamento = message;
+      sessao.etapa = 'aguardando_autorizacao';
+      sessao.aguardandoResposta = true;
 
-    const resumo = `Nome: ${sessao.nome}\nVisita: ${sessao.visita}\nPagamento: ${sessao.pagamento}`;
-    sessao.historico.push({ role: 'user', content: resumo });
+      const resumo = `Nome: ${sessao.nome}\nVisita: ${sessao.visita}\nPagamento: ${sessao.pagamento}`;
+      sessao.historico.push({ role: 'user', content: resumo });
 
-    const respostaFinal = await gerarResposta([
-      { role: 'system', content: process.env.GPT_PROMPT || 'Você é um assistente para atendimento de leads de imóvel.' },
-      ...sessao.historico
-    ]);
+      const respostaFinal = await gerarResposta([
+        { role: 'system', content: process.env.GPT_PROMPT || 'Você é um assistente para atendimento de leads de imóvel.' },
+        ...sessao.historico
+      ]);
 
-    sessao.historico.push({ role: 'assistant', content: respostaFinal });
+      sessao.historico.push({ role: 'assistant', content: respostaFinal });
 
-    await sendMessage(phone, respostaFinal);
-    await sendMessage(phone, 'Deseja que eu encaminhe suas informações ao corretor responsável? Responda "sim" para confirmar.');
-  } else if (etapaAtual === 'aguardando_autorizacao') {
-    if (texto.includes('sim')) {
-      const resumo = `📥 *Novo lead qualificado!*
+      await sendMessage(phone, respostaFinal);
+      await sendMessage(phone, 'Deseja que eu encaminhe suas informações ao corretor responsável? Responda "sim" para confirmar.');
+    } else if (sessao.etapa === 'aguardando_autorizacao') {
+      if (texto.includes('sim')) {
+        const resumo = `📥 *Novo lead qualificado!*
 WhatsApp: ${phone}
 Nome: ${sessao.nome}
 Visita: ${sessao.visita}
 Pagamento: ${sessao.pagamento}`;
-      await sendMessage(process.env.CORRETOR_PHONE, resumo);
-      await sendMessage(phone, 'Perfeito! Suas informações foram encaminhadas ao corretor. Ele entrará em contato.');
-      sessao.etapa = 'concluido';
-    } else {
-      await sendMessage(phone, 'Tudo bem! Se decidir depois, é só me avisar.');
+        await sendMessage(process.env.CORRETOR_PHONE, resumo);
+        await sendMessage(phone, 'Perfeito! Suas informações foram encaminhadas ao corretor. Ele entrará em contato.');
+      } else {
+        await sendMessage(phone, 'Tudo bem! Se decidir depois, é só me avisar.');
+      }
       sessao.etapa = 'concluido';
     }
   }
 
-  return res.sendStatus(200);
+  res.sendStatus(200);
 });
 
 async function sendMessage(phone, message) {
