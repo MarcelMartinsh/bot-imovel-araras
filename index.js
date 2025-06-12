@@ -11,47 +11,42 @@ const port = process.env.PORT || 3000;
 app.use(bodyParser.json());
 
 const sessions = {};
-const GATILHO = 'olá, gostaria de falar sobre o imóvel do jardim universitário, de araras/sp.';
 
-app.get('/', (req, res) => {
-  res.sendStatus(200);
-});
+const GATILHO = "olá, gostaria de falar sobre o imóvel do jardim universitário, de araras/sp.";
 
 app.post('/webhook', async (req, res) => {
-  console.log('📩 Requisição recebida no /webhook:', JSON.stringify(req.body));
+  const body = req.body;
+  const phone = body.phone;
+  const message = body.text?.message?.trim();
 
-  const phone = req.body.phone;
-  const message = req.body.text?.message?.trim();
-
-  if (!message || !phone) {
-    return res.status(400).send('Faltando dados.');
-  }
+  if (!message || !phone) return res.sendStatus(400);
 
   const msg = message.toLowerCase();
-  const sessao = sessions[phone];
 
-  if (!sessao) {
-    if (msg === GATILHO) {
-      sessions[phone] = {
-        etapa: 1,
-        nome: '',
-        visita: '',
-        pagamento: '',
-        autorizacao: '',
-        historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
-      };
-      await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
-    } else {
-      await sendMessage(phone, 'Olá! Para iniciarmos, envie a mensagem exata: "Olá, gostaria de falar sobre o imóvel do Jardim Universitário, de Araras/SP."');
-    }
+  // Se não há sessão ainda e mensagem é diferente do gatilho → ignora totalmente
+  if (!sessions[phone] && msg !== GATILHO) return res.sendStatus(200);
+
+  // Início da conversa com gatilho
+  if (!sessions[phone]) {
+    sessions[phone] = {
+      etapa: 1,
+      nome: '',
+      visita: '',
+      pagamento: '',
+      historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
+    };
+
+    await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
     return res.sendStatus(200);
   }
+
+  const sessao = sessions[phone];
 
   try {
     if (sessao.etapa === 1) {
       sessao.nome = message;
       sessao.etapa = 2;
-      await sendMessage(phone, 'Obrigado! Você gostaria de fazer uma visita ao imóvel?');
+      await sendMessage(phone, 'Obrigado! Você gostaria de agendar uma visita ao imóvel?');
     } else if (sessao.etapa === 2) {
       sessao.visita = message;
       sessao.etapa = 3;
@@ -59,36 +54,36 @@ app.post('/webhook', async (req, res) => {
     } else if (sessao.etapa === 3) {
       sessao.pagamento = message;
       sessao.etapa = 4;
-      const resumo = `Nome: ${sessao.nome}\nDeseja visita: ${sessao.visita}\nForma de pagamento: ${sessao.pagamento}`;
-      sessao.historico.push({ role: 'user', content: resumo });
+
+      const resumoLead = `
+Nome: ${sessao.nome}
+Deseja visita: ${sessao.visita}
+Forma de pagamento: ${sessao.pagamento}
+`.trim();
+
+      sessao.historico.push({ role: 'user', content: resumoLead });
       const resposta = await gerarResposta(sessao.historico);
       sessao.historico.push({ role: 'assistant', content: resposta });
+
       await sendMessage(phone, resposta);
+
+      // Espera confirmação explícita para encaminhar
+      await sendMessage(phone, 'Deseja que eu encaminhe essas informações ao corretor?');
       sessao.etapa = 5;
-      await sendMessage(phone, 'Deseja que eu encaminhe seu contato ao corretor responsável por este imóvel? Responda SIM para autorizar ou NÃO para encerrar.');
     } else if (sessao.etapa === 5) {
-      if (msg.includes('sim')) {
-        sessao.etapa = 6;
-        await sendMessage(
-          process.env.CORRETOR_PHONE,
-          `📥 *Novo lead qualificado!*
-WhatsApp: ${phone}
-Nome: ${sessao.nome}
-Visita: ${sessao.visita}
-Pagamento: ${sessao.pagamento}`
-        );
-        await sendMessage(phone, 'Perfeito! Seus dados foram encaminhados ao corretor. Ele entrará em contato em breve.');
+      if (isQualificado(message)) {
+        await sendMessage(process.env.CORRETOR_PHONE, `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${sessao.historico.map(m => m.content).join('\n\n')}`);
+        await sendMessage(phone, 'Perfeito! Encaminhei suas informações ao corretor. Ele entrará em contato em breve.');
+        delete sessions[phone];
       } else {
-        await sendMessage(phone, 'Tudo bem, não encaminharei suas informações. Caso precise, estarei por aqui.');
+        await sendMessage(phone, 'Tudo bem. Ficarei à disposição caso decida falar com o corretor.');
         delete sessions[phone];
       }
-    } else {
-      await sendMessage(phone, 'Se desejar reiniciar o atendimento, por favor, envie novamente a mensagem inicial.');
     }
 
     res.sendStatus(200);
   } catch (err) {
-    console.error('❌ Erro ao processar:', err.message);
+    console.error('❌ Erro:', err.message);
     await sendMessage(phone, '⚠️ Ocorreu um erro. Tente novamente mais tarde.');
     res.sendStatus(500);
   }
@@ -97,7 +92,7 @@ Pagamento: ${sessao.pagamento}`
 async function sendMessage(phone, message) {
   try {
     const url = `${process.env.ZAPI_BASE_URL}/send-text`;
-    const response = await axios.post(
+    await axios.post(
       url,
       { phone, message },
       {
@@ -108,7 +103,6 @@ async function sendMessage(phone, message) {
       }
     );
     console.log(`📤 Mensagem enviada para ${phone}: ${message}`);
-    return response.data;
   } catch (error) {
     console.error(`❌ Erro ao enviar mensagem para ${phone}:`, error.response?.data || error.message);
   }
