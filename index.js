@@ -3,7 +3,7 @@ const axios = require('axios');
 const bodyParser = require('body-parser');
 require('dotenv').config();
 
-const { gerarResposta, isQualificado } = require('./qualificador');
+const { gerarResposta, isRespostaValida } = require('./qualificador');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -11,92 +11,101 @@ const port = process.env.PORT || 3000;
 app.use(bodyParser.json());
 
 const sessions = {};
+const GATILHO = 'olá, gostaria de falar sobre o imóvel do jardim universitário, de araras/sp.';
 
-const GATILHO = "olá, gostaria de falar sobre o imóvel do jardim universitário, de araras/sp.";
+app.get('/', (req, res) => {
+  res.sendStatus(200);
+});
 
 app.post('/webhook', async (req, res) => {
-  const body = req.body;
-  const phone = body.phone;
-  const message = body.text?.message?.trim();
+  console.log('📩 Recebido:', JSON.stringify(req.body));
 
-  if (!message || !phone) return res.sendStatus(400);
+  const phone = req.body.phone;
+  const message = req.body.text?.message?.trim();
+
+  if (!phone || !message) return res.sendStatus(400);
 
   const msg = message.toLowerCase();
 
+  // Se não há sessão ativa e mensagem não é o gatilho, ignore silenciosamente
   if (!sessions[phone] && msg !== GATILHO) return res.sendStatus(200);
 
+  // Inicia nova sessão com a mensagem de gatilho
   if (!sessions[phone]) {
     sessions[phone] = {
       etapa: 1,
       nome: '',
       visita: '',
       pagamento: '',
-      historico: [{ role: 'system', content: process.env.GPT_PROMPT }],
-      aguardandoResposta: true
+      autorizouEnvio: false
     };
-
-    await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
+    await sendMessage(phone, 'Ótimo! Para começarmos, por favor, qual é o seu nome?');
     return res.sendStatus(200);
   }
 
   const sessao = sessions[phone];
 
-  if (!sessao.aguardandoResposta) return res.sendStatus(200);
-
   try {
-    let interpretado;
-
     if (sessao.etapa === 1) {
-      if (message.length < 2) {
-        const resposta = await gerarResposta([...sessao.historico, { role: 'user', content: message }]);
-        await sendMessage(phone, resposta);
+      if (!(await isRespostaValida('nome', message))) {
+        await sendMessage(phone, 'Desculpe, não entendi seu nome. Pode repetir?');
         return res.sendStatus(200);
       }
+
       sessao.nome = message;
       sessao.etapa = 2;
-      sessao.aguardandoResposta = true;
-      await sendMessage(phone, 'Obrigado! Você gostaria de agendar uma visita ao imóvel?');
-    } else if (sessao.etapa === 2) {
+      await sendMessage(phone, 'Perfeito! Você gostaria de agendar uma visita ao imóvel?');
+      return res.sendStatus(200);
+    }
+
+    if (sessao.etapa === 2) {
+      if (!(await isRespostaValida('visita', message))) {
+        await sendMessage(phone, 'Só confirmando, você deseja visitar o imóvel?');
+        return res.sendStatus(200);
+      }
+
       sessao.visita = message;
       sessao.etapa = 3;
-      sessao.aguardandoResposta = true;
-      await sendMessage(phone, 'Como pretende realizar o pagamento? Financiado ou à vista?');
-    } else if (sessao.etapa === 3) {
+      await sendMessage(phone, 'Como você pretende pagar? À vista ou financiado?');
+      return res.sendStatus(200);
+    }
+
+    if (sessao.etapa === 3) {
+      if (!(await isRespostaValida('pagamento', message))) {
+        await sendMessage(phone, 'Poderia informar se será à vista ou financiado?');
+        return res.sendStatus(200);
+      }
+
       sessao.pagamento = message;
       sessao.etapa = 4;
-      sessao.aguardandoResposta = true;
+      await sendMessage(phone, 'Deseja que eu envie essas informações ao corretor para contato direto? (sim ou não)');
+      return res.sendStatus(200);
+    }
 
-      const resumoLead = `
-Nome: ${sessao.nome}
-Deseja visita: ${sessao.visita}
-Forma de pagamento: ${sessao.pagamento}`.trim();
-
-      sessao.historico.push({ role: 'user', content: resumoLead });
-      const resposta = await gerarResposta(sessao.historico);
-      sessao.historico.push({ role: 'assistant', content: resposta });
-
-      await sendMessage(phone, resposta);
-      await sendMessage(phone, 'Deseja que eu encaminhe essas informações ao corretor?');
-
-      sessao.etapa = 5;
-    } else if (sessao.etapa === 5) {
-      if (isQualificado(message)) {
+    if (sessao.etapa === 4) {
+      if (msg.includes('sim')) {
+        sessao.autorizouEnvio = true;
+        const resumo = `Nome: ${sessao.nome}\nVisita: ${sessao.visita}\nPagamento: ${sessao.pagamento}`;
         await sendMessage(
           process.env.CORRETOR_PHONE,
-          `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${sessao.historico.map(m => m.content).join('\n\n')}`
+          `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resumo}`
         );
-        await sendMessage(phone, 'Perfeito! Encaminhei suas informações ao corretor.');
+        await sendMessage(phone, '✅ Informações enviadas ao corretor. Ele entrará em contato em breve!');
       } else {
-        await sendMessage(phone, 'Tudo bem. Ficarei à disposição caso decida falar com o corretor.');
+        await sendMessage(phone, 'Ok! Se quiser retomar depois, estou por aqui.');
       }
-      delete sessions[phone];
+
+      sessao.etapa = 99; // conversa encerrada
+      return res.sendStatus(200);
     }
+
+    // Etapa 99: não fazer mais nada
+    return res.sendStatus(200);
   } catch (err) {
     console.error('❌ Erro:', err.message);
-    await sendMessage(phone, '⚠️ Ocorreu um erro. Tente novamente mais tarde.');
+    await sendMessage(phone, '⚠️ Houve um erro. Tente novamente em instantes.');
+    return res.sendStatus(500);
   }
-
-  res.sendStatus(200);
 });
 
 async function sendMessage(phone, message) {
@@ -108,13 +117,13 @@ async function sendMessage(phone, message) {
       {
         headers: {
           'Content-Type': 'application/json',
-          'client-token': process.env.ZAPI_CLIENT_TOKEN
+          'client-token': process.env.ZAPI_CLIENT_TOKEN,
         }
       }
     );
-    console.log(`📤 Mensagem enviada para ${phone}: ${message}`);
+    console.log(`📤 Enviado para ${phone}: ${message}`);
   } catch (error) {
-    console.error(`❌ Erro ao enviar mensagem para ${phone}:`, error.response?.data || error.message);
+    console.error(`❌ Erro ao enviar para ${phone}:`, error.response?.data || error.message);
   }
 }
 
