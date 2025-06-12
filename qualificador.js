@@ -7,28 +7,17 @@ const openai = new OpenAI({
 async function gerarResposta(messages) {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4", // pode usar "gpt-3.5-turbo" se quiser economizar
+      model: "gpt-4", // ou "gpt-3.5-turbo"
       messages,
+      temperature: 0.7,
     });
 
-    return response.choices[0].message.content.trim();
+    const resposta = response.choices[0]?.message?.content?.trim();
+    return resposta || "Não consegui gerar uma resposta no momento.";
   } catch (error) {
     console.error("❌ Erro ao chamar OpenAI:", error.response?.data || error.message);
     throw new Error("Falha ao gerar resposta do ChatGPT.");
   }
 }
 
-function isQualificado(resposta) {
-  const texto = resposta.toLowerCase();
-  return (
-    texto.includes("visita") ||
-    texto.includes("agendar") ||
-    texto.includes("interessado") ||
-    texto.includes("financiamento") ||
-    texto.includes("compra") ||
-    texto.includes("à vista") ||
-    texto.includes("financiado")
-  );
-}
-
-module.exports = { gerarResposta, isQualificado };
+module.exports = { gerarResposta };
