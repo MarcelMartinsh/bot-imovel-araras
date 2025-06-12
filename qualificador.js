@@ -4,6 +4,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Gera resposta com IA da OpenAI
 async function gerarResposta(messages) {
   try {
     const response = await openai.chat.completions.create({
@@ -12,12 +13,23 @@ async function gerarResposta(messages) {
       temperature: 0.7,
     });
 
-    const resposta = response.choices[0]?.message?.content?.trim();
-    return resposta || "Não consegui gerar uma resposta no momento.";
+    return response.choices[0].message.content.trim();
   } catch (error) {
     console.error("❌ Erro ao chamar OpenAI:", error.response?.data || error.message);
     throw new Error("Falha ao gerar resposta do ChatGPT.");
   }
 }
 
-module.exports = { gerarResposta };
+// Verifica se o lead explicitamente pediu o contato com o corretor
+function isQualificado(respostaCliente) {
+  const texto = respostaCliente.toLowerCase();
+  return (
+    texto.includes("pode encaminhar") ||
+    texto.includes("pode passar") ||
+    texto.includes("pode enviar") ||
+    texto.includes("quero falar com o corretor") ||
+    texto.includes("sim, pode encaminhar")
+  );
+}
+
+module.exports = { gerarResposta, isQualificado };
