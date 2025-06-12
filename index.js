@@ -1,3 +1,4 @@
+// index.js (com fluxo conversacional por etapas)
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -10,120 +11,94 @@ const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-const sessions = {};
-const GATILHO = 'olá, gostaria de falar sobre o imóvel do jardim universitário, de araras/sp.';
-
-app.get('/', (req, res) => {
-  res.sendStatus(200);
-});
+const sessions = {}; // Memória de sessão por número
 
 app.post('/webhook', async (req, res) => {
-  console.log('📩 Recebido:', JSON.stringify(req.body));
-
   const phone = req.body.phone;
   const message = req.body.text?.message?.trim();
+  if (!message || !phone) return res.sendStatus(400);
 
-  if (!phone || !message) return res.sendStatus(400);
+  const gatilho = 'olá, gostaria de falar sobre o imóvel do jardim universitário, de araras/sp.';
+  const texto = message.toLowerCase();
 
-  const msg = message.toLowerCase();
-
-  // Se não há sessão ativa e mensagem não é o gatilho, ignore silenciosamente
-  if (!sessions[phone] && msg !== GATILHO) return res.sendStatus(200);
-
-  // Inicia nova sessão com a mensagem de gatilho
   if (!sessions[phone]) {
-    sessions[phone] = {
-      etapa: 1,
-      nome: '',
-      visita: '',
-      pagamento: '',
-      autorizouEnvio: false
-    };
-    await sendMessage(phone, 'Ótimo! Para começarmos, por favor, qual é o seu nome?');
+    if (texto === gatilho.toLowerCase()) {
+      sessions[phone] = {
+        etapa: 'nome', nome: '', visita: '', pagamento: '', historico: []
+      };
+      await sendMessage(phone, 'Ótimo! Para começar, por favor me informe seu nome.');
+    }
     return res.sendStatus(200);
   }
 
   const sessao = sessions[phone];
+  const etapaAtual = sessao.etapa;
 
-  try {
-    if (sessao.etapa === 1) {
-      if (!(await isRespostaValida('nome', message))) {
-        await sendMessage(phone, 'Desculpe, não entendi seu nome. Pode repetir?');
-        return res.sendStatus(200);
-      }
+  if (etapaAtual === 'concluido') return res.sendStatus(200);
 
-      sessao.nome = message;
-      sessao.etapa = 2;
-      await sendMessage(phone, 'Perfeito! Você gostaria de agendar uma visita ao imóvel?');
-      return res.sendStatus(200);
-    }
+  const respostaOk = await isRespostaValida(etapaAtual, message);
 
-    if (sessao.etapa === 2) {
-      if (!(await isRespostaValida('visita', message))) {
-        await sendMessage(phone, 'Só confirmando, você deseja visitar o imóvel?');
-        return res.sendStatus(200);
-      }
-
-      sessao.visita = message;
-      sessao.etapa = 3;
-      await sendMessage(phone, 'Como você pretende pagar? À vista ou financiado?');
-      return res.sendStatus(200);
-    }
-
-    if (sessao.etapa === 3) {
-      if (!(await isRespostaValida('pagamento', message))) {
-        await sendMessage(phone, 'Poderia informar se será à vista ou financiado?');
-        return res.sendStatus(200);
-      }
-
-      sessao.pagamento = message;
-      sessao.etapa = 4;
-      await sendMessage(phone, 'Deseja que eu envie essas informações ao corretor para contato direto? (sim ou não)');
-      return res.sendStatus(200);
-    }
-
-    if (sessao.etapa === 4) {
-      if (msg.includes('sim')) {
-        sessao.autorizouEnvio = true;
-        const resumo = `Nome: ${sessao.nome}\nVisita: ${sessao.visita}\nPagamento: ${sessao.pagamento}`;
-        await sendMessage(
-          process.env.CORRETOR_PHONE,
-          `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${resumo}`
-        );
-        await sendMessage(phone, '✅ Informações enviadas ao corretor. Ele entrará em contato em breve!');
-      } else {
-        await sendMessage(phone, 'Ok! Se quiser retomar depois, estou por aqui.');
-      }
-
-      sessao.etapa = 99; // conversa encerrada
-      return res.sendStatus(200);
-    }
-
-    // Etapa 99: não fazer mais nada
+  if (!respostaOk) {
+    await sendMessage(phone, 'Desculpe, não entendi sua resposta. Pode reformular?');
     return res.sendStatus(200);
-  } catch (err) {
-    console.error('❌ Erro:', err.message);
-    await sendMessage(phone, '⚠️ Houve um erro. Tente novamente em instantes.');
-    return res.sendStatus(500);
   }
+
+  if (etapaAtual === 'nome') {
+    sessao.nome = message;
+    sessao.etapa = 'visita';
+    await sendMessage(phone, 'Obrigado! Você gostaria de agendar uma visita ao imóvel?');
+
+  } else if (etapaAtual === 'visita') {
+    sessao.visita = message;
+    sessao.etapa = 'pagamento';
+    await sendMessage(phone, 'E como pretende realizar o pagamento? Financiado ou à vista?');
+
+  } else if (etapaAtual === 'pagamento') {
+    sessao.pagamento = message;
+    sessao.etapa = 'aguardando_autorizacao';
+
+    const resumo = `Nome: ${sessao.nome}\nVisita: ${sessao.visita}\nPagamento: ${sessao.pagamento}`;
+    sessao.historico.push({ role: 'user', content: resumo });
+
+    const respostaFinal = await gerarResposta([
+      { role: 'system', content: process.env.GPT_PROMPT || 'Você é um assistente para atendimento de leads de imóvel.' },
+      ...sessao.historico
+    ]);
+
+    sessao.historico.push({ role: 'assistant', content: respostaFinal });
+
+    await sendMessage(phone, respostaFinal);
+    await sendMessage(phone, 'Deseja que eu encaminhe suas informações ao corretor responsável? Responda "sim" para confirmar.');
+  } else if (etapaAtual === 'aguardando_autorizacao') {
+    if (texto.includes('sim')) {
+      const resumo = `📥 *Novo lead qualificado!*
+WhatsApp: ${phone}
+Nome: ${sessao.nome}
+Visita: ${sessao.visita}
+Pagamento: ${sessao.pagamento}`;
+      await sendMessage(process.env.CORRETOR_PHONE, resumo);
+      await sendMessage(phone, 'Perfeito! Suas informações foram encaminhadas ao corretor. Ele entrará em contato.');
+      sessao.etapa = 'concluido';
+    } else {
+      await sendMessage(phone, 'Tudo bem! Se decidir depois, é só me avisar.');
+      sessao.etapa = 'concluido';
+    }
+  }
+
+  return res.sendStatus(200);
 });
 
 async function sendMessage(phone, message) {
   try {
-    const url = `${process.env.ZAPI_BASE_URL}/send-text`;
-    await axios.post(
-      url,
-      { phone, message },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'client-token': process.env.ZAPI_CLIENT_TOKEN,
-        }
+    await axios.post(`${process.env.ZAPI_BASE_URL}/send-text`, { phone, message }, {
+      headers: {
+        'Content-Type': 'application/json',
+        'client-token': process.env.ZAPI_CLIENT_TOKEN
       }
-    );
-    console.log(`📤 Enviado para ${phone}: ${message}`);
-  } catch (error) {
-    console.error(`❌ Erro ao enviar para ${phone}:`, error.response?.data || error.message);
+    });
+    console.log(`📤 Mensagem enviada para ${phone}: ${message}`);
+  } catch (err) {
+    console.error(`❌ Erro ao enviar mensagem para ${phone}:`, err.response?.data || err.message);
   }
 }
 
