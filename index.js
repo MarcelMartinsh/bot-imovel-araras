@@ -23,17 +23,16 @@ app.post('/webhook', async (req, res) => {
 
   const msg = message.toLowerCase();
 
-  // Se não há sessão ainda e mensagem é diferente do gatilho → ignora totalmente
   if (!sessions[phone] && msg !== GATILHO) return res.sendStatus(200);
 
-  // Início da conversa com gatilho
   if (!sessions[phone]) {
     sessions[phone] = {
       etapa: 1,
       nome: '',
       visita: '',
       pagamento: '',
-      historico: [{ role: 'system', content: process.env.GPT_PROMPT }]
+      historico: [{ role: 'system', content: process.env.GPT_PROMPT }],
+      aguardandoResposta: true
     };
 
     await sendMessage(phone, 'Ótimo! Por favor, poderia me informar seu nome?');
@@ -42,51 +41,62 @@ app.post('/webhook', async (req, res) => {
 
   const sessao = sessions[phone];
 
+  if (!sessao.aguardandoResposta) return res.sendStatus(200);
+
   try {
+    let interpretado;
+
     if (sessao.etapa === 1) {
+      if (message.length < 2) {
+        const resposta = await gerarResposta([...sessao.historico, { role: 'user', content: message }]);
+        await sendMessage(phone, resposta);
+        return res.sendStatus(200);
+      }
       sessao.nome = message;
       sessao.etapa = 2;
+      sessao.aguardandoResposta = true;
       await sendMessage(phone, 'Obrigado! Você gostaria de agendar uma visita ao imóvel?');
     } else if (sessao.etapa === 2) {
       sessao.visita = message;
       sessao.etapa = 3;
+      sessao.aguardandoResposta = true;
       await sendMessage(phone, 'Como pretende realizar o pagamento? Financiado ou à vista?');
     } else if (sessao.etapa === 3) {
       sessao.pagamento = message;
       sessao.etapa = 4;
+      sessao.aguardandoResposta = true;
 
       const resumoLead = `
 Nome: ${sessao.nome}
 Deseja visita: ${sessao.visita}
-Forma de pagamento: ${sessao.pagamento}
-`.trim();
+Forma de pagamento: ${sessao.pagamento}`.trim();
 
       sessao.historico.push({ role: 'user', content: resumoLead });
       const resposta = await gerarResposta(sessao.historico);
       sessao.historico.push({ role: 'assistant', content: resposta });
 
       await sendMessage(phone, resposta);
-
-      // Espera confirmação explícita para encaminhar
       await sendMessage(phone, 'Deseja que eu encaminhe essas informações ao corretor?');
+
       sessao.etapa = 5;
     } else if (sessao.etapa === 5) {
       if (isQualificado(message)) {
-        await sendMessage(process.env.CORRETOR_PHONE, `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${sessao.historico.map(m => m.content).join('\n\n')}`);
-        await sendMessage(phone, 'Perfeito! Encaminhei suas informações ao corretor. Ele entrará em contato em breve.');
-        delete sessions[phone];
+        await sendMessage(
+          process.env.CORRETOR_PHONE,
+          `📥 *Novo lead qualificado!*\nWhatsApp: ${phone}\nResumo:\n${sessao.historico.map(m => m.content).join('\n\n')}`
+        );
+        await sendMessage(phone, 'Perfeito! Encaminhei suas informações ao corretor.');
       } else {
         await sendMessage(phone, 'Tudo bem. Ficarei à disposição caso decida falar com o corretor.');
-        delete sessions[phone];
       }
+      delete sessions[phone];
     }
-
-    res.sendStatus(200);
   } catch (err) {
     console.error('❌ Erro:', err.message);
     await sendMessage(phone, '⚠️ Ocorreu um erro. Tente novamente mais tarde.');
-    res.sendStatus(500);
   }
+
+  res.sendStatus(200);
 });
 
 async function sendMessage(phone, message) {
