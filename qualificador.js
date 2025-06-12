@@ -1,8 +1,7 @@
-// qualificador.js
+// qualificador.js atualizado com verificação via IA também
 const OpenAI = require("openai");
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Gera uma resposta do ChatGPT com histórico
 async function gerarResposta(messages) {
   try {
     const response = await openai.chat.completions.create({
@@ -16,28 +15,60 @@ async function gerarResposta(messages) {
   }
 }
 
+// Novo: IA avalia se a resposta é coerente com a etapa
+async function iaValidaResposta(etapa, texto) {
+  try {
+    const systemPrompt = `
+Você é um assistente que valida se uma resposta enviada por um usuário faz sentido com base na etapa da conversa.
+
+Etapas:
+- nome: usuário deve informar um nome válido.
+- visita: usuário deve dizer se quer visitar o imóvel.
+- pagamento: usuário deve dizer como pretende pagar.
+- aguardando_autorizacao: usuário deve autorizar ou não o envio ao corretor.
+
+Retorne apenas "sim" ou "nao".
+`;
+
+    const userPrompt = `Etapa atual: ${etapa}
+Resposta do usuário: "${texto}"`;
+
+    const res = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+    });
+
+    const resposta = res.choices[0].message.content.trim().toLowerCase();
+    return resposta.includes("sim");
+  } catch (err) {
+    console.error("❌ Erro na IA de validação:", err.message);
+    return false;
+  }
+}
+
 // Valida se a resposta é coerente com a etapa
 async function isRespostaValida(etapa, texto) {
   if (!texto || texto.length < 2) return false;
-  const t = texto.toLowerCase();
 
-  if (etapa === 'nome') {
-    return t.length >= 3 && !/\d/.test(t); // Nome não deve conter números
-  }
+  const validaPadrao = {
+    nome: t => t.length >= 3 && !/\d/.test(t),
+    visita: t => ['sim', 'não', 'nao', 'talvez', 'quero'].some(p => t.includes(p.toLowerCase())),
+    pagamento: t => ['vista', 'financiado', 'pix', 'financiamento'].some(p => t.includes(p.toLowerCase())),
+    aguardando_autorizacao: t => ['sim', 'pode', 'encaminhe', 'mande'].some(p => t.includes(p.toLowerCase())),
+  };
 
-  if (etapa === 'visita') {
-    return ['sim', 'não', 'nao', 'talvez', 'quero'].some(pal => t.includes(pal));
-  }
+  const textoLC = texto.toLowerCase();
 
-  if (etapa === 'pagamento') {
-    return ['vista', 'financiado', 'pix', 'financiamento'].some(p => t.includes(p));
-  }
+  // Primeiro verifica pelo padrão tradicional
+  const padraoOk = validaPadrao[etapa]?.(textoLC);
 
-  if (etapa === 'aguardando_autorizacao') {
-    return ['sim', 'pode', 'encaminhe', 'mande'].some(p => t.includes(p));
-  }
+  if (padraoOk) return true;
 
-  return false;
+  // Se não passou, pede ajuda à IA
+  return await iaValidaResposta(etapa, texto);
 }
 
 module.exports = { gerarResposta, isRespostaValida };
